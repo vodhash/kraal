@@ -179,6 +179,21 @@ fn carry_plan(from: &Account, to: &Account, session: &str) -> Result<Carry> {
     valid_session(session)?;
     let (src, dst) = (transcript(from, session)?, transcript(to, session)?);
     let src = src.with_context(|| format!("the Claude transcript for {session} is missing on {}", label(from)))?;
+    if let Some(dst) = &dst {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        // Opened, not only looked at: a transcript the agent cannot read cannot be resumed.
+        let opened = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&src);
+        let s = opened.and_then(|f| f.metadata()).with_context(|| format!("reading {}", src.display()))?;
+        let d = std::fs::metadata(dst).with_context(|| format!("reading {}", dst.display()))?;
+        // A shared transcript copies nothing, so the transfer size limit does not apply to it.
+        if s.dev() == d.dev() && s.ino() == d.ino() {
+            anyhow::ensure!(s.len() > 0, "the Claude transcript for {session} is empty on {}", label(from));
+            if !from.same_home(to) {
+                destination_idle(to, None)?;
+            }
+            return Ok(Carry::There);
+        }
+    }
     let source = Revision::read(&src).with_context(|| format!("reading {}", src.display()))?;
     anyhow::ensure!(!source.data.is_empty(), "the Claude transcript for {session} is empty on {}", label(from));
     let Some(dst) = dst else {
@@ -189,13 +204,6 @@ fn carry_plan(from: &Account, to: &Account, session: &str) -> Result<Carry> {
     };
     let dst = dst.canonicalize()?;
     let previous = Revision::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
-    use std::os::unix::fs::MetadataExt;
-    if source.metadata.dev() == previous.metadata.dev() && source.metadata.ino() == previous.metadata.ino() {
-        if !from.same_home(to) {
-            destination_idle(to, None)?;
-        }
-        return Ok(Carry::There);
-    }
     destination_idle(to, Some(&dst))?;
     if previous.data.starts_with(&source.data) {
         return Ok(Carry::There);
@@ -366,12 +374,22 @@ mod tests {
         let t = Transfer::new();
         let src = t.dir.0.join("from/projects/work/session.jsonl");
         std::fs::OpenOptions::new().write(true).open(&src).unwrap().set_len(1 << 40).unwrap();
-        for to in [&t.from, &t.to] {
-            let error = format!("{:#}", check_carry(&t.from, to, "session").unwrap_err());
-            assert!(error.contains("too large to transfer safely"), "{error}");
-        }
+        let error = format!("{:#}", check_carry(&t.from, &t.to, "session").unwrap_err());
+        assert!(error.contains("too large to transfer safely"), "{error}");
         assert!(carry_conversation(&t.from, &t.to, "session").is_err());
         assert_eq!(std::fs::read_to_string(&t.dst).unwrap(), "first\n");
+    }
+
+    #[test]
+    fn oversized_shared_transcripts_resume_and_switch_without_copying() {
+        let t = Transfer::new();
+        let src = t.dir.0.join("from/projects/work/session.jsonl");
+        std::fs::OpenOptions::new().write(true).open(&src).unwrap().set_len(1 << 40).unwrap();
+        check_resume(&t.from, "session").unwrap();
+        std::fs::remove_file(&t.dst).unwrap();
+        std::fs::hard_link(&src, &t.dst).unwrap();
+        check_carry(&t.from, &t.to, "session").unwrap();
+        assert!(carry_conversation(&t.from, &t.to, "session").unwrap());
     }
 
     #[test]
