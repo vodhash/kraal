@@ -927,6 +927,9 @@ mod plain {
             Handler::reset_state(&mut *self.0)
         }
         fn input(&mut self, c: char) {
+            if crate::pane::archive::zerowidth_full(self.0, c) {
+                return;
+            }
             if self.0.mode().contains(TermMode::INSERT) {
                 mended(self.0, |t| Handler::input(t, c))
             } else {

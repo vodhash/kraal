@@ -656,6 +656,26 @@ pub(super) fn utf8_len(lead: u8) -> usize {
     }
 }
 
+/// Whether `c` is a zero-width character its cell has no room left for. alacritty 0.26 keeps
+/// every one, so a flood of them would grow the pane and each frame without limit. The cell is
+/// the one it picks: before the cursor, or the first half of a wide character.
+pub(super) fn zerowidth_full<T>(term: &Term<T>, c: char) -> bool {
+    use unicode_width::UnicodeWidthChar;
+    if c.width() != Some(0) {
+        return false;
+    }
+    let cursor = &term.grid().cursor;
+    let mut column = cursor.point.column;
+    if !cursor.input_needs_wrap {
+        column.0 = column.saturating_sub(1);
+    }
+    let row = &term.grid()[cursor.point.line];
+    if row[column].flags.contains(Flags::WIDE_CHAR_SPACER) {
+        column.0 = column.saturating_sub(1);
+    }
+    row[column].zerowidth().is_some_and(|z| z.len() >= super::scrollback::MAX_ZEROWIDTH)
+}
+
 /// Make `edit` to the cursor's row (deleting, inserting or erasing characters, erasing part of
 /// the line or the screen, a character inserted), then blank the half it left of a wide
 /// character. alacritty 0.26 keeps it whole on one side: a cursor on a second half alone at the
@@ -1153,6 +1173,9 @@ impl<T: EventListener> Handler for Feed<'_, T> {
 
     #[inline]
     fn input(&mut self, c: char) {
+        if zerowidth_full(self.term, c) {
+            return;
+        }
         // A character pushes a row only when it wraps: after the last column was written, or a
         // wide one at the last column.
         if self.term.grid().cursor.input_needs_wrap || c >= WIDE_FROM {
@@ -1404,6 +1427,19 @@ mod tests {
         let t = b.term();
         let bytes = t.archive.lines().bytes();
         assert!(bytes < t.archive.lines().len() * 60, "{bytes} bytes for {} lines", t.archive.lines().len());
+    }
+
+    #[test]
+    fn a_cell_keeps_a_bounded_number_of_combining_characters() {
+        let mut b = Both::new();
+        let combining: String = std::iter::repeat_n('\u{301}', 5000).collect();
+        // A narrow character, then a wide one whose second half the cursor passed.
+        b.feed(format!("e{combining}日{combining}x").as_bytes());
+        let row = &b.term().term.grid()[Line(0)];
+        for column in [0, 1] {
+            assert_eq!(row[Column(column)].zerowidth().map(<[char]>::len), Some(16), "column {column}");
+        }
+        assert_eq!(row[Column(3)].c, 'x');
     }
 
     #[test]

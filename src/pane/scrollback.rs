@@ -20,8 +20,8 @@ pub const MAX_SAVED_BYTES: usize = 4 << 20;
 const MAX_WRAPPED_ROWS: i32 = 1000;
 /// Links longer than this are saved as plain text.
 const MAX_LINK: usize = 2048;
-/// Zero-width characters saved with a cell: more only lengthen a sequence no terminal draws.
-const MAX_ZEROWIDTH: usize = 16;
+/// Zero-width characters kept with a cell: more only lengthen a sequence no terminal draws.
+pub(super) const MAX_ZEROWIDTH: usize = 16;
 
 /// The attributes saved with the text, and their SGR parameters.
 const ATTRIBUTES: [(Flags, &str); 11] = [
