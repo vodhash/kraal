@@ -193,7 +193,7 @@ impl Server {
                 self.probe_cell_size(id);
                 self.relayout();
             }
-            ClientMsg::Displayed { id: ask } => self.production_displayed(id, ask),
+            ClientMsg::Displayed { id: mark } => self.production_displayed(id, mark),
             ClientMsg::Repaint => {
                 self.production_repaint(id);
                 if let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached) {

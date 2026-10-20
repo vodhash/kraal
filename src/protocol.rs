@@ -326,8 +326,8 @@ pub enum ServerMsg {
         pane: Option<crate::layout::PaneId>,
         agent: bool,
     },
-    /// The frames before it show question `id`: answer [`ClientMsg::Displayed`] once they are on
-    /// the terminal.
+    /// The frames before it show a question, and `id` is new for each time they do: answer
+    /// [`ClientMsg::Displayed`] once they are on the terminal.
     DisplayMark {
         id: u32,
     },

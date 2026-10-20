@@ -462,6 +462,8 @@ pub struct Server {
     waits: Vec<PendingWait>,
     /// Agents' actions on production waiting for the user, the one asked first first.
     production_asks: Vec<approvals::ProductionAsk>,
+    /// The last [`protocol::ServerMsg::DisplayMark`] sent: each display of a question gets its own.
+    production_marks: u32,
     persist_dirty: bool,
     last_persist: Instant,
     last_tick: Instant,
@@ -968,6 +970,7 @@ impl Server {
             layout_area: Rect::new(0, 1, 120, 39 - u16::from(bottom_bar)),
             waits: Vec::new(),
             production_asks: Vec::new(),
+            production_marks: 0,
             persist_dirty: false,
             last_persist: Instant::now(),
             last_tick: Instant::now(),

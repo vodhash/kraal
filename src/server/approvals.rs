@@ -34,9 +34,10 @@ pub(super) struct ProductionAsk {
 enum Display {
     /// In no frame sent yet.
     Pending,
-    /// A frame carried it, then a [`ServerMsg::DisplayMark`] the client answers once it wrote
-    /// that frame to its terminal.
-    Marked,
+    /// A frame carried it, then [`ServerMsg::DisplayMark`] with this id, which the client
+    /// answers once it wrote that frame to its terminal. A mark answered late for an earlier
+    /// display (before a repaint) is not this one.
+    Marked(u32),
     /// The client displayed it then.
     At(std::time::Instant),
 }
@@ -305,14 +306,16 @@ impl Server {
     /// A frame went to client `id`: the first since a question showed there carries it, and a
     /// mark follows it for the client to answer once that frame is on its terminal.
     pub(super) fn frame_sent(&mut self, id: ClientId) {
-        let Some(ask) = self.production_asks.iter_mut().find(|a| a.shown == Some((id, Display::Pending))) else {
+        let Some(at) = self.production_asks.iter().position(|a| a.shown == Some((id, Display::Pending))) else {
             return;
         };
+        self.production_marks = self.production_marks.wrapping_add(1);
+        let number = self.production_marks;
         let mut mark = Vec::new();
-        let _ = protocol::write_json(&mut mark, &ServerMsg::DisplayMark { id: ask.id });
+        let _ = protocol::write_json(&mut mark, &ServerMsg::DisplayMark { id: number });
         let Some(c) = self.clients.get_mut(&id) else { return };
         if c.out.try_send(mark).is_ok() {
-            ask.shown = Some((id, Display::Marked));
+            self.production_asks[at].shown = Some((id, Display::Marked(number)));
         } else {
             // A client behind: a whole frame carries the question again, then its mark.
             c.encoder.invalidate();
@@ -331,10 +334,9 @@ impl Server {
         }
     }
 
-    /// Client `id` displayed the question about action `ask`.
-    pub(super) fn production_displayed(&mut self, id: ClientId, ask: u32) {
-        if let Some(a) = self.production_asks.iter_mut().find(|a| a.id == ask && a.shown == Some((id, Display::Marked)))
-        {
+    /// Client `id` displayed what came before mark `mark`.
+    pub(super) fn production_displayed(&mut self, id: ClientId, mark: u32) {
+        if let Some(a) = self.production_asks.iter_mut().find(|a| a.shown == Some((id, Display::Marked(mark)))) {
             a.shown = Some((id, Display::At(std::time::Instant::now())));
         }
     }
@@ -645,8 +647,17 @@ mod tests {
     /// A frame goes to `ui`, and its client says it displayed the question, as a client does.
     fn displayed(s: &mut Setup) {
         s.server.render_clients();
-        let ask = asking(&s.server, s.ui).expect("the user is asked");
-        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
+        asking(&s.server, s.ui).expect("the user is asked");
+        let mark = s
+            .server
+            .production_asks
+            .iter()
+            .find_map(|a| match a.shown {
+                Some((c, Display::Marked(mark))) if c == s.ui => Some(mark),
+                _ => None,
+            })
+            .expect("the frame showing the question was marked");
+        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: mark }).unwrap();
         s.server.client_frame(s.ui, protocol::JSON, ack);
     }
 
@@ -1061,14 +1072,15 @@ mod tests {
                 marks.push(id);
             }
         }
-        assert_eq!(marks, [ask]);
+        let [mark] = marks[..] else { panic!("one mark after the frame: {marks:?}") };
+        assert_eq!(asking(&s.server, s.ui), Some(ask));
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(asking(&s.server, s.ui).is_some() && receive.is_empty(), "not displayed: no answer");
-        // Another question's mark, or another client's, displays nothing here.
-        let other = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask + 1 }).unwrap();
+        // Another mark, or this one from another client, displays nothing here.
+        let other = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: mark + 1 }).unwrap();
         s.server.client_frame(s.ui, protocol::JSON, other);
-        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
+        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: mark }).unwrap();
         s.server.client_frame(id, protocol::JSON, ack.clone());
         s.server.client_input(s.ui, b"y");
         assert!(receive.is_empty(), "nothing displayed it on this client");
@@ -1101,20 +1113,24 @@ mod tests {
         };
         let (id, _peer, receive) = caller(&mut s.server, s.agent);
         assert!(matches!(s.server.request(id, exec("covered")), RequestOutcome::Deferred));
-        let ask = asking(&s.server, s.ui).unwrap();
+        assert!(asking(&s.server, s.ui).is_some());
         s.server.render_clients();
-        assert_eq!(marks(&held), [ask]);
-        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
-        s.server.client_frame(s.ui, protocol::JSON, ack.clone());
-        std::thread::sleep(SEEN);
-        // The client's own question covered it until now.
+        let [first] = marks(&held)[..] else { panic!("one mark after the frame") };
+        let ack = |mark| serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: mark }).unwrap();
+        // The client's own question covered it until now: the first mark is still on its way.
         let repaint = serde_json::to_vec(&crate::protocol::ClientMsg::Repaint).unwrap();
         s.server.client_frame(s.ui, protocol::JSON, repaint);
         s.server.client_input(s.ui, b"y");
         assert!(asking(&s.server, s.ui).is_some() && receive.is_empty(), "covered: no answer");
         s.server.render_clients();
-        assert_eq!(marks(&held), [ask], "the repainted frame carries the mark again");
-        s.server.client_frame(s.ui, protocol::JSON, ack);
+        let [again] = marks(&held)[..] else { panic!("the repainted frame carries a mark") };
+        assert_ne!(again, first, "a mark of its own");
+        // The first mark answered late, once the local question closed, displays nothing.
+        s.server.client_frame(s.ui, protocol::JSON, ack(first));
+        std::thread::sleep(SEEN);
+        s.server.client_input(s.ui, b"y");
+        assert!(receive.is_empty(), "an earlier display's mark: no answer");
+        s.server.client_frame(s.ui, protocol::JSON, ack(again));
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(matches!(response(&receive), Ok(Response::Ok)));
