@@ -172,6 +172,7 @@ const CLAUDE_VALUE: &[&str] = &[
     "--plugin-url",
     "--remote",
     "--remote-control-session-name-prefix",
+    "--teammate-mode",
     "-n",
     "--name",
 ];

@@ -73,11 +73,11 @@ impl Server {
         placement: Placement,
         cwd: Option<PathBuf>,
     ) -> Result<PaneId> {
-        self.launch_agent_with(ws, target, agent, account, placement, cwd, &[])
+        self.launch_agent_with(ws, target, agent, account, placement, cwd, &[], false)
     }
 
     /// [`Server::launch_agent`], giving the agent `args` too.
-    #[expect(clippy::too_many_arguments, reason = "the arguments of `launch_agent`, and the agent's own")]
+    #[expect(clippy::too_many_arguments, reason = "the arguments of `launch_agent`, and the agent's own and teams")]
     pub fn launch_agent_with(
         &mut self,
         ws: u32,
@@ -87,12 +87,14 @@ impl Server {
         placement: Placement,
         cwd: Option<PathBuf>,
         args: &[String],
+        teams: bool,
     ) -> Result<PaneId> {
         let registered = crate::agent_registry::find(agent).with_context(|| format!("unknown agent {agent:?}"))?;
+        let teams = if teams { crate::tmux::lead_env(&self.env.socket) } else { Vec::new() };
         if registered.accounts.is_none() {
             let cwd = self.agent_cwd(ws, target, cwd);
             let launch = registered.native_launch(account, args, cwd.as_deref())?;
-            let mut spec = PaneSpec { command: launch.argv, cwd, ..Default::default() };
+            let mut spec = PaneSpec { command: launch.argv, env: teams, cwd, ..Default::default() };
             spec.agent_clipboard();
             return self.spawn_pane_in(ws, target, spec, placement, Some(agent.into()));
         }
@@ -115,7 +117,8 @@ impl Server {
                     .context("no account allowed here: the matching rule in accounts.toml names none")?
             }
         };
-        let spec = self.agent_spec(&a, cwd, None, args)?;
+        let mut spec = self.agent_spec(&a, cwd, None, args)?;
+        spec.env.extend(teams);
         self.spawn_pane_in(ws, target, spec, placement, Some(a.agent.clone()))
     }
 
@@ -192,6 +195,7 @@ pub(super) fn resume_spec(accounts: &accounts::Accounts, spec: &PaneSpec, sessio
             }
             fresh.env.extend(spec.env.iter().filter(|(k, _)| k == "PATH").cloned());
             crate::worktree_setup::carry_env(&spec.env, &mut fresh.env);
+            crate::tmux::carry_env(&spec.env, &mut fresh.env);
             (fresh, exact)
         }
         Err(_) => (spec.clone(), false),

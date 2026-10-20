@@ -281,6 +281,29 @@ impl Server {
         result
     }
 
+    /// Replace the program of pane `id` with `command`, as tmux's `respawn-pane -k` does.
+    pub(super) fn respawn_command(&mut self, id: PaneId, command: Vec<String>) -> Result<(), String> {
+        // Never a production pane: what runs there is chosen by who sends to it, knowingly.
+        self.allow_input(id, false)?;
+        let label = self.pane_label(id);
+        let pane = self.panes.get_mut(&id).ok_or("no such pane")?;
+        if pane.term().is_none() {
+            return Err(format!("{label} runs no program to replace"));
+        }
+        pane.kill();
+        pane.spec = PaneSpec {
+            command,
+            cwd: pane.spec.cwd.clone(),
+            close_on_exit: pane.spec.close_on_exit,
+            ..Default::default()
+        };
+        pane.ssh = None;
+        let result = pane.respawn(&self.env, &self.tx).map_err(|e| format!("{e:#}"));
+        self.persist_dirty = true;
+        self.mark_dirty();
+        result
+    }
+
     /// A pane in workspace `ws` that runs `prelude` (a new worktree's setup) before its own
     /// command, `spec`: the command starts in its place once the prelude succeeds, and waits for
     /// Enter when it fails.

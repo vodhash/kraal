@@ -497,6 +497,12 @@ pub enum Request {
         pane: String,
         name: String,
     },
+    /// Replace a pane's program with `command`: tmux's `respawn-pane -k`, with which Claude's
+    /// agent teams start a teammate in the pane they split (see `kraal agent --teams`).
+    RespawnPane {
+        pane: String,
+        command: Vec<String>,
+    },
     /// Type into a pane. A production pane is refused unless `production` says the caller
     /// knows (scripts and agents must not reach production by accident).
     SendText {
@@ -587,6 +593,9 @@ pub enum Request {
         /// Given to the agent after kraal's own arguments.
         #[serde(default)]
         args: Vec<String>,
+        /// Claude Code's agent teams open their teammates as kraal panes (`crate::tmux`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        teams: bool,
     },
     /// Forward `remote` (`[host:]port` as seen from the server) to a local port, and keep it up.
     TunnelAdd {
@@ -958,6 +967,7 @@ mod tests {
             Request::ClosePane { pane: s("1") },
             Request::FocusPane { pane: s("1") },
             Request::RenamePane { pane: s("1"), name: s("n") },
+            Request::RespawnPane { pane: s("1"), command: vec![s("sh"), s("-c"), s("claude")] },
             Request::SendText { pane: s("1"), text: s("hi"), production: true },
             Request::SendKeys { pane: s("1"), keys: vec![s("ctrl+c")], production: false },
             Request::ReadPane { pane: s("1"), lines: Some(5) },
@@ -994,6 +1004,7 @@ mod tests {
                 near: None,
                 cwd: Some(p("/")),
                 args: vec![s("-c")],
+                teams: true,
             },
             Request::TunnelAdd { server: s("web"), remote: s("80"), local: Some(8080) },
             Request::TunnelRemove { key: s("8080") },

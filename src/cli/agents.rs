@@ -335,9 +335,15 @@ pub(super) fn agent(
     account: Option<String>,
     placement: Placement,
     here: bool,
-    args: Vec<String>,
+    teams: bool,
+    mut args: Vec<String>,
 ) -> Result<()> {
     let inside = std::env::var_os("KRAAL_SOCKET").is_some();
+    if teams {
+        anyhow::ensure!(agent == "claude", "--teams is for Claude Code's agent teams: kraal agent claude --teams");
+        anyhow::ensure!(inside, "--teams works inside kraal: Claude's teammates open as its panes");
+        args = crate::tmux::lead_args(args);
+    }
     if inside && !here {
         let opened = s.request(Request::OpenAgent {
             account_id: None,
@@ -347,13 +353,18 @@ pub(super) fn agent(
             near: s.own_pane(),
             cwd: std::env::current_dir().ok(),
             args,
+            teams,
         })?;
         super::print_opened(&opened);
         return Ok(());
     }
     // Here, in this pane: its workspace's account rules still apply.
     let workspace = if inside { s.own_workspace() } else { None };
-    exec_agent(&agent, account.as_deref(), workspace.as_deref(), &args, &[])
+    let env = match std::env::var_os("KRAAL_SOCKET").filter(|_| teams) {
+        Some(socket) => crate::tmux::lead_env(std::path::Path::new(&socket)),
+        None => Vec::new(),
+    };
+    exec_agent(&agent, account.as_deref(), workspace.as_deref(), &args, &env)
 }
 
 /// Start an agent on the chosen account in this terminal, with `env` besides the account's.
@@ -460,6 +471,7 @@ pub(super) fn worktrees(s: &Session, action: WtCmd) -> Result<()> {
                         near: s.own_pane(),
                         cwd: Some(w.path.clone()),
                         args: Vec::new(),
+                        teams: false,
                     })?;
                     super::print_opened(&opened);
                 } else {

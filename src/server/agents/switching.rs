@@ -766,6 +766,7 @@ impl Server {
             }
             spec.env.extend(source.env.iter().filter(|(k, _)| k == "PATH").cloned());
             crate::worktree_setup::carry_env(&original.env, &mut spec.env);
+            crate::tmux::carry_env(&original.env, &mut spec.env);
             self.switches.starting(pane);
             if !undo {
                 let mut previous = original.clone();

@@ -155,7 +155,7 @@ impl Server {
                 self.new_pane(req)
             }
 
-            Request::OpenAgent { agent, account, account_id, placement, near, cwd, args } => {
+            Request::OpenAgent { agent, account, account_id, placement, near, cwd, args, teams } => {
                 let account = match account_id {
                     Some(id) => match self.accounts.by_id(&id).filter(|a| a.agent == agent) {
                         Some(a) => Some(format!("@{}", a.id)),
@@ -196,7 +196,7 @@ impl Server {
                                 server.git_result(dir, info.map(Box::new));
                             }
                             let result = server.with_workspace_cleanup(|server| {
-                                server.open_agent(near, &agent, account.as_deref(), placement, cwd, &args)
+                                server.open_agent(near, &agent, account.as_deref(), placement, cwd, &args, teams)
                             });
                             reply.complete(server, result);
                         },
@@ -208,7 +208,7 @@ impl Server {
                         },
                     };
                 }
-                self.open_agent(near, &agent, account.as_deref(), placement, cwd, &args)
+                self.open_agent(near, &agent, account.as_deref(), placement, cwd, &args, teams)
             }
             Request::EditRemote { target, line, near, production, sudo } => {
                 let near = match near.as_deref().map(|n| self.resolve(n)).transpose() {
@@ -352,6 +352,9 @@ impl Server {
                 }
                 Response::Ok
             }),
+            Request::RespawnPane { pane, command } => {
+                self.resolve(&pane).and_then(|p| self.respawn_command(p, command)).map(|()| Response::Ok)
+            }
             Request::RenamePane { pane, name } => self.resolve(&pane).map(|p| {
                 self.rename_pane(p, (!name.is_empty()).then_some(name));
                 self.mark_persist();
@@ -642,6 +645,7 @@ impl Server {
             .or_else(|| self.available_workspace(None))
     }
 
+    #[expect(clippy::too_many_arguments, reason = "the fields of `Request::OpenAgent`")]
     fn open_agent(
         &mut self,
         near: Option<PaneId>,
@@ -650,12 +654,13 @@ impl Server {
         placement: crate::protocol::Placement,
         cwd: Option<std::path::PathBuf>,
         args: &[String],
+        teams: bool,
     ) -> Result<Response, String> {
         let ws = match self.agent_workspace(near) {
             Some(ws) => ws,
             None => self.new_workspace("main".into(), None),
         };
-        self.launch_agent_with(ws, near, agent, account, placement, cwd, args)
+        self.launch_agent_with(ws, near, agent, account, placement, cwd, args, teams)
             .map(|p| Response::Pane(Box::new(self.pane_info(p))))
             .map_err(|e| format!("{e:#}"))
     }
@@ -1079,7 +1084,16 @@ pub(super) mod tests {
                     else {
                         unreachable!()
                     };
-                    Request::OpenAgent { agent, account, account_id, placement, near, cwd: Some(cwd), args }
+                    Request::OpenAgent {
+                        agent,
+                        account,
+                        account_id,
+                        placement,
+                        near,
+                        cwd: Some(cwd),
+                        args,
+                        teams: false,
+                    }
                 } else {
                     Request::NewPane {
                         target: None,
@@ -1139,6 +1153,7 @@ pub(super) mod tests {
             near: None,
             cwd: None,
             args: Vec::new(),
+            teams: false,
         }
     }
 

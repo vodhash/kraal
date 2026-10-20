@@ -44,6 +44,7 @@ mod testing;
 mod text;
 mod theme;
 mod threads;
+mod tmux;
 mod tools;
 mod transfer;
 mod unknown_keys;
