@@ -1,7 +1,7 @@
 <h1 align="center">kraal</h1>
 
 <p align="center">
-  <b>A terminal multiplexer that knows your servers and your coding agents.</b>
+  <b>Your coding agents and your servers, in one terminal.</b>
 </p>
 
 <p align="center">
@@ -19,39 +19,52 @@
 </p>
 
 <p align="center">
-  <img src="assets/kraal.png" alt="kraal: a production SSH pane framed in red, Claude Code waiting for a permission, Codex at work, and a sidebar with workspaces, agents, tunnels, ports and account usage" width="100%">
+  <img src="assets/demo.gif" alt="kraal: two Claude Code agents finish in their worktrees, alt+a jumps to the one that needs you, it deploys to production after one approval in kraal, then the web servers open in a grid with the production ones framed in red and answer a command typed once" width="100%">
 </p>
 
-kraal runs in the terminal you already use: panes, tabs and workspaces that keep running when you
-close the window. It also knows what each pane is doing: the server it is
-on, the branch, whether that server is production, the agent working there and whether it is
-waiting for you.
+kraal is a terminal multiplexer for developers who run coding agents, and for the people who look
+after servers: often the same person. Each pane knows the agent working there and the account it
+uses, the server it is on, and whether that server is production.
 
-- **Never hunt for the stuck agent.** Claude Code, Codex, OpenCode, Gemini and 26 others are
-  marked working, blocked or done, in the sidebar and on their pane, with a desktop notification.
-  Those running in kraal on your servers are listed too. `alt+a` jumps to the next one that needs
-  you.
+**For your coding agents**
+
+- **See which agent needs you.** Claude Code, Codex, OpenCode, Gemini and 26 others are marked
+  working, blocked or done, in the sidebar and on their pane, with a desktop notification. Those
+  running in kraal on your servers are listed too. `alt+a` jumps to the next one that needs you.
 - **Several agents on one repository.** Start an agent in its own worktree and branch, then
   review, commit, open a pull request or merge without leaving kraal.
-- **Named Claude and Codex accounts.** See reported usage, choose accounts per project, and
-  change an agent pane's account with an Undo action. Claude can continue a verified conversation;
-  changing Codex accounts starts a new one. [Accounts and limits](docs/agents.md#accounts)
+- **Named Claude and Codex accounts.** See each account's 5-hour and weekly usage, choose
+  accounts per project, and change an agent pane's account with an Undo action. Claude can
+  continue a verified conversation; changing Codex accounts starts a new one.
+  [Accounts and limits](docs/agents.md#accounts)
+
+**For your servers**
+
 - **Your servers, one key away.** Add a server explicitly, or review a discovered connection
   before saving it. Open one, or a whole group in a grid; type in all of them at once; copy files
-  between any two; keep tunnels open.
+  between any two; keep tunnels open. kraal uses your own `ssh` and installs nothing on servers.
 - **Production looks like production.** A pane on a production server, cluster, Terraform
-  workspace or AWS profile gets a red frame, and kraal asks before broadcast typing or a
-  multi-line paste lands there.
-- **Tools where you are.** lazygit, k9s, htop or the logs open on the focused pane's server or in
-  its directory. `ctrl+b o` labels every link, path, commit or pod on screen, to copy or open it.
+  workspace or AWS profile gets a red frame. kraal asks before broadcast typing or a multi-line
+  paste lands there. When an agent acts on production through kraal (`kraal exec`, `cp`, `rm`,
+  `ssh`, `send`…), you see the exact plan and approve it first, and it is logged.
+  [Production](docs/production.md)
 - **Runbooks that stop at the first failure.** Procedures kept as files run server by server
   after showing their plan, and log everything. Your Markdown docs run block by block.
+
+**Everywhere**
+
 - **Close the terminal, keep working.** Sessions keep running when the window closes or the
   connection drops. Workspaces keep their layout automatically, including after Close, and
   Delete offers recovery. After a reboot, kraal restores saved layouts and available scrollback;
   [resume rules](docs/workspaces.md#what-resumes) determine which programs restart.
+- **Tools where you are.** lazygit, k9s, htop or the logs open on the focused pane's server or in
+  its directory. `ctrl+b o` labels every link, path, commit or pod on screen, to copy or open it.
 - **One binary, any modern terminal.** Linux and macOS. The kitty keyboard protocol (Shift+Enter
   reaches Claude Code), images in panes (kitty graphics and sixel), shell integration, the mouse.
+
+<p align="center">
+  <img src="assets/kraal.png" alt="kraal: a production SSH pane framed in red, Claude Code waiting for a permission, Codex at work, and a sidebar with workspaces, agents, tunnels, ports and account usage" width="100%">
+</p>
 
 ## Install
 
@@ -91,6 +104,27 @@ its hooks once (here Claude Code; `kraal integration status` lists the others):
 ```sh
 kraal integration install claude
 ```
+
+## Why not tmux, Ansible or plain ssh?
+
+Keep them: kraal runs your own `ssh`, and its panes run whatever you ran in tmux. What it adds is
+the layer between them:
+
+| | tmux | Ansible, pdsh | kraal |
+|---|---|---|---|
+| Layouts and scrollback restored after a reboot | with plugins | — | built in |
+| Which agent is working, blocked or done, and on which account | — | — | ✔ |
+| One command on a whole group of servers | — | ✔ | ✔ `kraal exec @group` |
+| A live grid of servers, typing in all of them at once | by hand | — | ✔ |
+| Production framed in red, confirmations before it is reached | — | — | ✔ |
+| An agent's production actions through kraal wait for your approval | — | — | ✔ |
+| Runbooks that show their plan and stop at the first failure | — | playbooks | ✔ |
+
+## Local-first
+
+No account and no telemetry. kraal reaches the network only for what you ask: your `ssh`
+connections, `git` and `gh` for pull requests, and `kraal update`. Nothing is installed on your
+servers unless you ask for it (`kraal remote-install`). Apache-2.0.
 
 ## Keys you can guess
 
@@ -180,6 +214,8 @@ nobody uses it daily yet; Windows is not supported. Known gaps:
   shows again once it stays put, and never on the window's last row.
 - Agent states come from hooks for Claude Code and eight other agents, and for what Gemini CLI's,
   Codex's, Cursor's and Augment's hooks tell; otherwise they are read from the screen and can lag.
+- The production guard is a safety net based on names, not a permission system: an agent that
+  runs `ssh` or a cloud CLI itself does not go through kraal.
 
 Bug reports and ideas are welcome in the [issues](https://github.com/vodhash/kraal/issues).
 
