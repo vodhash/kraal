@@ -912,6 +912,15 @@ impl Server {
             if let Some(p) = self.panes.get_mut(&pane) {
                 p.spec.account_undo = (!switch.undo).then(|| Box::new(original));
             }
+            let fields = serde_json::json!({
+                "agent": switch.to.agent,
+                "account": switch.to.name,
+                "account_id": switch.to.id,
+                "from": switch.from.name,
+                "from_id": switch.from.id,
+                "undo": switch.undo,
+            });
+            self.emit_pane("account.changed", pane, fields);
             let message = format!("Using {}", switch.to.name);
             if switch.undo {
                 self.notify(NoticeKind::Notice, &message, "Account change undone", Some(pane));

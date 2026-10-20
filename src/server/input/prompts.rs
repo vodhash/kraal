@@ -267,6 +267,7 @@ impl Server {
             return Mode::Confirm(q);
         }
         let action = q.action;
+        let decision = if yes { "allowed" } else { "refused" };
         match action {
             ConfirmAction::RetrySsh(pane) => {
                 if yes {
@@ -356,21 +357,44 @@ impl Server {
             ConfirmAction::Production { workspace, approve, pending } => {
                 return self.answer_production(id, yes, workspace, approve, pending);
             }
+            ConfirmAction::Edit(ref target) => {
+                let sudo = if target.sudo { " --sudo" } else { "" };
+                let plan = format!("kraal edit{sudo} {}:{}", target.server, target.path);
+                let server =
+                    format!("{} ({})", target.server, target.ssh.last().map(String::as_str).unwrap_or_default());
+                self.record_yours(target.near, "edit", &plan, vec![server], decision);
+            }
             ConfirmAction::ApproveProduction(ask) => {
                 self.answer_production_ask(ask, yes);
                 return Mode::Normal;
             }
             ConfirmAction::RunRunbook => {
+                if let Some(d) = self.drafts.get(&id) {
+                    let servers = self.runbook_production(d);
+                    if !servers.is_empty() {
+                        let (pane, plan) = (d.pane, self.plan(d, true));
+                        self.record_yours(pane, "runbook", &plan, servers, decision);
+                    }
+                }
                 self.confirm_runbook(id, yes);
                 return Mode::Normal;
             }
-            ConfirmAction::RunBlock { index, production } => return self.confirm_block(id, index, production, yes),
+            ConfirmAction::RunBlock { index, production } => {
+                if let Some((pane, plan)) = production.as_ref().and_then(|_| self.block_record(id, index)) {
+                    let server = format!("{} ({})", self.pane_label(pane), production.as_ref().unwrap().why);
+                    self.record_yours(Some(pane), "runbook block", &plan, vec![server], decision);
+                }
+                return self.confirm_block(id, index, production, yes);
+            }
             ConfirmAction::TrustRunbook => return self.confirm_trust(id, yes),
             ConfirmAction::TrustWorktreeSetup(new) => {
                 self.confirm_worktree_setup(id, *new, yes);
                 return Mode::Normal;
             }
             ConfirmAction::RunTool { pane, name, selection, reason, place } => {
+                let server =
+                    pane.map(|p| format!("{} ({})", self.pane_label(p), reason.why)).unwrap_or(reason.why.clone());
+                self.record_yours(pane, "tool", &name, vec![server], decision);
                 if !yes {
                     return Mode::Normal;
                 }

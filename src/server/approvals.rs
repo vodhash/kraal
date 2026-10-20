@@ -110,6 +110,14 @@ impl Server {
             Place::Elsewhere | Place::Outside => None,
         };
         if agent.is_none() && !matches!(place, Place::Elsewhere) {
+            // Yours: not asked, but on record.
+            if let Ok(Some(need)) = self.production_need(&req) {
+                let pane = match place {
+                    Place::Pane(pane) => Some(pane),
+                    Place::Elsewhere | Place::Outside => None,
+                };
+                self.record_yours(pane, &need.kind, &need.plan, need.servers, "yours");
+            }
             return Ok((reply, req));
         }
         let need = match self.production_need(&req) {
@@ -117,6 +125,16 @@ impl Server {
             Ok(None) => return Ok((reply, req)),
             Err(e) => return Err(RequestOutcome::Immediate { reply, result: Err(format!("{e}: nothing was done")) }),
         };
+        if let Request::RunbookRun { token } = &req
+            && let Some((_, d)) = self.plans.get(token)
+            && !d.listed().is_empty()
+        {
+            let error = format!(
+                "{} lists choices with commands and acts on production: from an agent's pane, those commands would run before you are asked; run it yourself: nothing was done",
+                d.runbook_name()
+            );
+            return Err(RequestOutcome::Immediate { reply, result: Err(error) });
+        }
         // Only the session of the agent's pane knows the agent, and asks about it.
         let Some((pane, agent)) = agent else {
             let session = &self.session;
@@ -207,22 +225,7 @@ impl Server {
             }
             Request::RunbookRun { token } => {
                 let (_, d) = self.plans.get(token).ok_or("no such plan: review the runbook again")?;
-                let targets: Vec<_> = d.targets.iter().flatten().collect();
-                let production = targets.iter().any(|t| self.target_production(t, d.pane).is_some());
-                if production && !d.listed().is_empty() {
-                    return Err(format!(
-                        "{} lists choices with commands and acts on production: from an agent's pane, those commands would run before you are asked; run it yourself",
-                        d.runbook_name()
-                    ));
-                }
-                let servers: Vec<String> = d
-                    .targets
-                    .iter()
-                    .flatten()
-                    .filter_map(|t| {
-                        self.target_production(t, d.pane).map(|p| format!("{} ({})", self.target_label(t), p.why))
-                    })
-                    .collect();
+                let servers = self.runbook_production(d);
                 Ok((!servers.is_empty()).then(|| Need {
                     kind: "runbook".into(),
                     plan: self.plan(d, true),
@@ -234,6 +237,15 @@ impl Server {
             }
             _ => Ok(None),
         }
+    }
+
+    /// The production targets of a runbook's plan, each with why it is production.
+    pub(in crate::server) fn runbook_production(&self, d: &super::runbooks::Draft) -> Vec<String> {
+        d.targets
+            .iter()
+            .flatten()
+            .filter_map(|t| self.target_production(t, d.pane).map(|p| format!("{} ({})", self.target_label(t), p.why)))
+            .collect()
     }
 
     /// Whether the caller may be an agent that is not asked here: one runs in its pane, or it
@@ -495,15 +507,41 @@ impl Server {
         Value::Object(fields)
     }
 
-    /// Append the answer about `ask` to the production log, a whole line under the lock that
-    /// sessions writing the same file share.
+    /// Your own action on production, or your answer to kraal's question about one (`allowed`,
+    /// `refused`; `yours` when kraal does not ask), on record. A line that cannot be written is
+    /// only reported: what you do yourself goes on.
+    pub(in crate::server) fn record_yours(
+        &mut self,
+        pane: Option<PaneId>,
+        kind: &str,
+        plan: &str,
+        servers: Vec<String>,
+        decision: &str,
+    ) {
+        let mut fields = pane.map(|p| self.pane_fields(p)).unwrap_or_default();
+        fields.insert("agent".into(), Value::Null);
+        fields.insert("kind".into(), json!(kind));
+        fields.insert("plan".into(), json!(plan));
+        fields.insert("servers".into(), json!(servers));
+        fields.insert("decision".into(), json!(decision));
+        if let Err(e) = self.append_production_log(fields) {
+            self.warnings.push(format!("{}: {e}", production_log().display()));
+        }
+    }
+
+    /// Append the answer about `ask` to the production log.
     fn log_production(&self, ask: &ProductionAsk, decision: &str) -> std::io::Result<()> {
+        let Value::Object(fields) = self.production_fields(ask, decision) else { unreachable!() };
+        self.append_production_log(fields)
+    }
+
+    /// Append `fields`, with when and the session, to the production log: a whole line under
+    /// the lock that sessions writing the same file share.
+    fn append_production_log(&self, fields: serde_json::Map<String, Value>) -> std::io::Result<()> {
         let mut line = serde_json::Map::new();
         line.insert("time".into(), json!(super::events::now_ms()));
         line.insert("session".into(), json!(self.session));
-        if let Value::Object(fields) = self.production_fields(ask, decision) {
-            line.extend(fields);
-        }
+        line.extend(fields);
         let mut text = format!("{}\n", Value::Object(line));
         let log = production_log();
         if let Some(dir) = log.parent() {
@@ -684,6 +722,11 @@ mod tests {
         let outcome = s.server.request(shell, exec("outside-agent"));
         assert!(matches!(immediate(&mut s.server, outcome), Ok(Response::Ok)));
         assert_eq!(asking(&s.server, s.ui), None);
+        // Yours, on record all the same.
+        let line = logged("outside-agent");
+        assert_eq!((line["decision"].as_str(), line["agent"].is_null()), (Some("yours"), true));
+        assert_eq!((line["kind"].as_str(), &line["pane"]), (Some("exec"), &json!(s.shell)));
+        assert_eq!(line["servers"], json!(["web-prod-1"]));
     }
 
     #[test]

@@ -41,6 +41,7 @@ pub const TYPES: &[&str] = &[
     "port.opened",
     "port.closed",
     "account.limit",
+    "account.changed",
     "runbook.started",
     "runbook.finished",
     "command.finished",
@@ -82,7 +83,7 @@ pub struct Subscriber {
 pub struct EventLog {
     boot: u64,
     seq: u64,
-    kept: VecDeque<Map<String, Value>>,
+    pub(super) kept: VecDeque<Map<String, Value>>,
 }
 
 impl Default for EventLog {
