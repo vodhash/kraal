@@ -311,6 +311,45 @@ dev server can run in several worktrees at once:
 `npm run dev -- --port $((5173 + KRAAL_PORT_OFFSET))`. The sidebar's PORTS section names the
 worktree a port is served from.
 
+**Pull requests.** With [`gh`](https://cli.github.com) installed and signed in, kraal follows the
+pull request of the branch each local pane is on, in a worktree or not: the one whose head is
+that branch where `git push` puts it (its push remote, or else `origin` under its own name), an
+open one first. kraal asks that remote's host only when it is github.com or a host `gh` is
+signed in to (`gh auth login --hostname`), never another forge. A branch not pushed there yet has
+none and costs no request.
+The frame shows it after the branch: `#12 ⋯` while its checks run, `#12 ✓` when they pass, `#12 ✗` when one fails (`✗2`:
+two), then `draft`, `changes requested`, `approved` and the number of review comments left to
+address; `#12 merged` once merged. The agent's line in the sidebar shows `#12 ✗` too. kraal asks
+GitHub again every 30 seconds while checks run, every 2 minutes otherwise, every 15 minutes once
+the pull request is closed, and soon after a commit or a push that sets the branch's upstream
+(`git push -u`, as **Open a pull request** does); after another push, within 5 minutes. Without
+`gh`, or without a GitHub remote, it shows nothing and says nothing.
+
+When the checks of its last commit fail or pass, when a review asks for changes or approves, or
+when new comments come, kraal notifies you (`on_pull_request` in
+[`[notifications]`](configuration.md)) and emits a [`pr.*` event](scripting.md#events).
+`ctrl+b R g` then offers:
+
+- **Open pull request #12** in your browser;
+- **Send failing checks to the agent**: the failed checks with their links, and the command that
+  shows why (`gh run view 123 --repo owner/name --log-failed`), asking the agent to fix them and
+  push;
+- **Send review comments to the agent**: the unresolved threads on the current code (`file:line`
+  and each message), and what a reviewer asking for changes wrote in the review itself.
+
+Both go to the agent working on that branch (the focused pane when it is one), as one paste
+followed by Enter, after kraal shows you the exact text: nothing is sent by itself. Review
+comments are text other people wrote, which an agent would act on: only those of the people
+GitHub names the repository's owner, its collaborators or members of its organization, and your
+own, are sent; a thread someone else opened is left out whole. The others are named in the
+question and left out. Control and invisible characters are written out (`\u{1b}`), so the agent
+gets what you read. kraal reads the last 100 review threads and the first 50 messages of each,
+and the text says when there is more. Nothing is sent to an agent on production, to a pane
+where something else than its agent runs in front (its shell after a suspend, or a program
+started from there: it would run the text), to an agent working in another checkout than its
+pane's, to one whose checkout has moved to another branch since you were asked (read again when
+you answer), or to one that does not take a paste whole: its lines would go one by one.
+
 **Cleanup.** `ctrl+b R g` › Remove merged worktrees, from any checkout of the repository, removes
 in one go the worktrees whose work is all in their base, after saying which panes it closes and
 why the others stay. `kraal wt prune` does the same, keeping the worktrees panes of the session

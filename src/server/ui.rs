@@ -177,6 +177,15 @@ pub enum ConfirmAction {
         account: crate::accounts::Account,
         undo: bool,
     },
+    /// Paste this text into an agent's pane, then Enter: a pull request's failed checks or
+    /// review comments, as the user was shown them.
+    SendToAgent {
+        pane: PaneId,
+        /// The repository (main checkout) and branch the text is about.
+        main: std::path::PathBuf,
+        branch: String,
+        text: String,
+    },
     /// Run a git shell script in a job pane.
     GitJob {
         label: String,
@@ -273,6 +282,7 @@ impl ConfirmAction {
             ConfirmAction::TrustRunbook => "Trust this version".into(),
             ConfirmAction::RunRunbook => "Run".into(),
             ConfirmAction::RunBlock { .. } => "Send to the pane".into(),
+            ConfirmAction::SendToAgent { .. } => "Send to the agent".into(),
             ConfirmAction::Production { .. } => "Send".into(),
         }
     }

@@ -475,6 +475,9 @@ impl Server {
                         self.git_job(id, &label, script, crate::server::worktrees::JobEnd::CloseOnSuccess)
                     }
                     ConfirmAction::RemoveWorktrees(list) => self.remove_worktrees(id, list),
+                    ConfirmAction::SendToAgent { pane, main, branch, text } => {
+                        self.confirm_send(id, pane, main, branch, text)
+                    }
                     ConfirmAction::RetryAccountSwitch { pane, account, undo } => {
                         let result = self
                             .accounts

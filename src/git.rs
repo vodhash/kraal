@@ -13,6 +13,12 @@ pub struct GitInfo {
     pub root: PathBuf,
     /// Branch name, or a short commit id when detached.
     pub branch: String,
+    /// No branch is checked out (`branch` is a commit id).
+    pub detached: bool,
+    /// The commit checked out (`(initial)` before the first).
+    pub head: String,
+    /// The branch it follows (`origin/main`), if any.
+    pub upstream: Option<String>,
     /// Tracked files differ from HEAD.
     pub dirty: bool,
     /// Files git does not track yet (what agents create most), or perhaps: in a tree too big to
@@ -134,6 +140,31 @@ pub fn status(cwd: &Path) -> Option<GitInfo> {
     Some(info)
 }
 
+/// Where `branch` is pushed, as `git push` would push it (`branch.<name>.pushRemote`,
+/// `remote.pushDefault`, `push.default`), or else to `origin` under its own name: that remote's
+/// URL and the branch there. `None` until it has been pushed there (its remote-tracking branch
+/// exists).
+pub fn pushed_to(dir: &Path, branch: &str) -> Option<(String, String)> {
+    let t = Duration::from_secs(2);
+    let format = "--format=%(push:remotename)%00%(push)";
+    let push = git(dir, &["for-each-ref", format, &format!("refs/heads/{branch}")], t).ok()?;
+    let pushed = push.trim_end().split_once('\0').and_then(|(remote, tracking)| {
+        if remote.is_empty() {
+            return None;
+        }
+        // `push.default=simple` to another remote than the upstream's (`pushRemote`): git names no
+        // remote-tracking branch, the push goes to the branch of the same name there.
+        let tracking = if tracking.is_empty() { format!("refs/remotes/{remote}/{branch}") } else { tracking.into() };
+        let there = tracking.strip_prefix(&format!("refs/remotes/{remote}/"))?.to_string();
+        Some((remote.to_string(), there, tracking))
+    });
+    let (remote, there, tracking) =
+        pushed.unwrap_or_else(|| ("origin".into(), branch.into(), format!("refs/remotes/origin/{branch}")));
+    git(dir, &["rev-parse", "--verify", "--quiet", &tracking], t).ok()?;
+    let url = git(dir, &["remote", "get-url", "--push", &remote], t).ok()?;
+    Some((url.trim().to_string(), there))
+}
+
 /// `path` with its symbolic links resolved (itself when it cannot be).
 pub fn real_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
@@ -197,7 +228,7 @@ pub fn parse_status(text: &str) -> Option<GitInfo> {
                 branch = Some(h.to_string());
             }
         } else if let Some(o) = line.strip_prefix("# branch.oid ") {
-            oid = Some(o.chars().take(7).collect::<String>());
+            oid = Some(o.to_string());
         } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
             for part in ab.split_whitespace() {
                 if let Some(n) = part.strip_prefix('+') {
@@ -212,10 +243,15 @@ pub fn parse_status(text: &str) -> Option<GitInfo> {
             untracked = true;
         }
     }
-    let branch = branch.or(oid)?;
+    let head = oid?;
+    let detached = branch.is_none();
+    let branch = branch.unwrap_or_else(|| head.chars().take(7).collect());
     Some(GitInfo {
         root: PathBuf::new(),
         branch,
+        detached,
+        head,
+        upstream: upstream(text).map(str::to_string),
         dirty,
         untracked,
         ahead,
@@ -1437,5 +1473,49 @@ mod tests {
             Command::new("git").arg("-C").arg(&repo).args(["config", "--get-regexp", "^branch\\.kraal/sq\\."]).output();
         assert!(settings.unwrap().stdout.is_empty(), "and its settings");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_branch_is_followed_where_git_push_puts_it() {
+        let dir = std::env::temp_dir().join(format!("kraal-pushed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = dir.canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(ok.status.success(), "{args:?}: {}", String::from_utf8_lossy(&ok.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "one"]);
+        git(&["config", "push.default", "simple"]);
+        for (remote, url) in [("origin", "git@github.com:o/r.git"), ("fork", "git@github.com:me/r.git")] {
+            git(&["config", &format!("remote.{remote}.url"), url]);
+        }
+        for branch in ["fix", "solo", "local"] {
+            git(&["branch", branch]);
+        }
+        assert_eq!(pushed_to(&repo, "local"), None, "never pushed");
+        // Pushed without -u: origin's branch of the same name.
+        git(&["update-ref", "refs/remotes/origin/solo", "HEAD"]);
+        assert_eq!(pushed_to(&repo, "solo"), Some(("git@github.com:o/r.git".into(), "solo".into())));
+        // Fetched from a mirror, pushed to GitHub: where it is pushed.
+        git(&["config", "remote.origin.pushurl", "git@github.com:o/pushed.git"]);
+        assert_eq!(pushed_to(&repo, "solo"), Some(("git@github.com:o/pushed.git".into(), "solo".into())));
+        git(&["config", "--unset", "remote.origin.pushurl"]);
+        // Following origin/fix, pushed to the fork: the fork's fix, once it is there.
+        git(&["update-ref", "refs/remotes/origin/fix", "HEAD"]);
+        git(&["config", "branch.fix.remote", "origin"]);
+        git(&["config", "branch.fix.merge", "refs/heads/fix"]);
+        git(&["config", "branch.fix.pushRemote", "fork"]);
+        assert_eq!(pushed_to(&repo, "fix"), None, "not on the fork yet");
+        git(&["update-ref", "refs/remotes/fork/fix", "HEAD"]);
+        assert_eq!(pushed_to(&repo, "fix"), Some(("git@github.com:me/r.git".into(), "fix".into())));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

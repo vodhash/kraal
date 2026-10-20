@@ -64,6 +64,7 @@ keys = "context"         # the focused pane's actions on the last row; "off": no
 mode = "terminal"        # terminal (OSC 777 and OSC 9), system (notify-send), both, off
 on_blocked = true        # an agent that waits for you
 on_done = true           # an agent that finished
+on_pull_request = true   # a pull request's checks fail or pass, or its review changes (gh)
 long_command = 30        # seconds a command runs before its end is announced; 0: never
 ```
 

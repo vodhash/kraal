@@ -1529,6 +1529,9 @@ impl Server {
                     None => pane.agent.kind.clone().unwrap_or_default(),
                 };
                 let mut detail = format!("{}{sep}{kind}", s.label());
+                if let Some(pr) = self.pane_pr(p) {
+                    detail = format!("{detail}{sep}{}", pr.label(t.ascii, false).0);
+                }
                 if ws.id != c.workspace {
                     detail = format!("{detail}{sep}{}", ws.name);
                 }
@@ -1939,6 +1942,10 @@ impl Server {
         if let Some(g) = self.pane_git(pid) {
             let color = if g.dirty || g.untracked { Color::Yellow } else { th().dim };
             out.push(Span::styled(format!(" {} ", g.label(th().ascii)), Style::default().fg(color)));
+        }
+        if let Some(pr) = self.pane_pr(pid) {
+            let (label, tone) = pr.label(th().ascii, true);
+            out.push(Span::styled(format!(" {label} "), Style::default().fg(Self::pr_color(tone))));
         }
         for (label, is_prod) in self.context_labels(pid) {
             let color = if is_prod { th().production } else { th().dim };

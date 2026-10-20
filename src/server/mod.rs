@@ -41,6 +41,7 @@ mod reload;
 pub mod remote;
 mod render;
 mod requests;
+mod reviews;
 pub mod runbooks;
 mod server_ui;
 mod ssh;
@@ -552,6 +553,8 @@ pub struct Server {
     limit_events: std::collections::HashSet<PaneId>,
     /// Branch and changes per directory (None: not a repository).
     pub git: HashMap<PathBuf, Option<crate::git::GitInfo>>,
+    /// The pull requests of the branches panes are on (see [`reviews`]).
+    prs: reviews::PrWatches,
     /// The directories panes are in: when to ask git about them again, and the watches on
     /// them, on their repositories and on the configuration's directories.
     dirwatch: dirwatch::DirWatch,
@@ -1049,6 +1052,7 @@ impl Server {
             port_candidates: HashMap::new(),
             ports: Default::default(),
             git: HashMap::new(),
+            prs: HashMap::new(),
             dirwatch: dirwatch::DirWatch::new(None),
             git_requests: crossbeam_channel::unbounded().0,
             launches: crossbeam_channel::unbounded().0,
@@ -1432,13 +1436,15 @@ impl Server {
     }
 
     /// When the next tick comes: [`TICK`] after the last while something happens, else when
-    /// the scan is due, else [`IDLE_EVERY`] after the last.
+    /// the scan is due, else [`IDLE_EVERY`] after the last; sooner when a pull request is due.
     fn next_tick(&self) -> Instant {
-        match (self.idle, self.scan_polled) {
+        let usual = match (self.idle, self.scan_polled) {
             (false, _) => self.last_tick + TICK,
             (true, true) => self.last_scan + SCAN_EVERY,
             (true, false) => self.last_tick + IDLE_EVERY,
-        }
+        };
+        // A pull request due to be asked about wakes the server (see [`reviews`]).
+        self.next_pr_due().map_or(usual, |due| usual.min(due.max(self.last_tick + TICK)))
     }
 
     /// Whether what the scan reads has to be looked at every [`SCAN_EVERY`]: contexts in use or
@@ -1623,6 +1629,7 @@ impl Server {
             self.refresh_ports();
         }
         self.refresh_git(now);
+        self.refresh_prs(now);
         self.check_tunnels();
         self.check_remotes();
         if self.last_codex_poll.elapsed() > Duration::from_secs(300) {

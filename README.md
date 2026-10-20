@@ -32,7 +32,9 @@ uses, the server it is on, and whether that server is production.
   working, blocked or done, in the sidebar and on their pane, with a desktop notification. Those
   running in kraal on your servers are listed too. `alt+a` jumps to the next one that needs you.
 - **Several agents on one repository.** Start an agent in its own worktree and branch, then
-  review, commit, open a pull request or merge without leaving kraal.
+  review, commit, open a pull request or merge without leaving kraal. Each pane shows its pull
+  request's checks and review; a key sends the failing checks or the review comments back to
+  the agent. [Pull requests](docs/agents.md#worktrees)
 - **Answer them from your phone.** In kraal, `kraal agent claude --remote` puts Claude on Remote
   Control: approve its permission prompts from the Claude app while kraal keeps it running.
   [From your phone](docs/agents.md#from-your-phone)
