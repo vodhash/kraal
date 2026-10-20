@@ -681,5 +681,7 @@ or wait until usage falls below the threshold and reaches it again.
 Workspace files can say `agent="claude"` (rules apply) or `agent="claude:pro"`.
 
 `auto` is off by default. Providers set usage limits per subscription; check their terms (for
-Anthropic, the Usage Policy's section on bypassing product restrictions) before letting a tool
-move your work between subscriptions automatically.
+Anthropic, the Usage Policy's rules against platform abuse; for OpenAI, the Terms of
+Use on circumventing rate limits or restrictions) before letting a tool move your work between
+subscriptions automatically. Accounts are for the subscriptions you hold yourself (work and
+personal ones, say): both providers forbid sharing an account's sign-in with someone else.
