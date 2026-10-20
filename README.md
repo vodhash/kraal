@@ -78,6 +78,12 @@ uses, the server it is on, and whether that server is production.
 curl -fsSL https://raw.githubusercontent.com/vodhash/kraal/main/install.sh | sh
 ```
 
+Or with Homebrew, on macOS and Linux:
+
+```sh
+brew install vodhash/tap/kraal
+```
+
 Or, with Rust 1.88 or later:
 
 ```sh
@@ -86,8 +92,8 @@ cargo install kraal
 
 The script takes the [prebuilt archive](https://github.com/vodhash/kraal/releases) for your
 machine (Linux and macOS, x86_64 and arm64), checks its checksum and installs into
-`~/.local/bin`. To update later, `kraal update` for the script's install, `cargo install kraal`
-again for Cargo's. [More ways](docs/install.md)
+`~/.local/bin`. To update later, `kraal update` for the script's install, `brew upgrade kraal`
+for Homebrew's, `cargo install kraal` again for Cargo's. [More ways](docs/install.md)
 
 ## Quick start
 

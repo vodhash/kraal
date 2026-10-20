@@ -107,8 +107,14 @@ fn version_of(tag: &str) -> &str {
     tag.strip_prefix('v').unwrap_or(tag)
 }
 
-/// The package manager that owns `exe`, if any: it would put its own copy back.
+/// The package manager that owns `exe`, if any: it would put its own copy back. Homebrew links
+/// its `bin` into its Cellar (`/usr/local/bin/kraal` on an Intel Mac): where a link leads counts.
 fn package_manager(exe: &Path) -> Option<&'static str> {
+    let real = std::fs::canonicalize(exe).ok();
+    std::iter::once(exe).chain(real.as_deref()).find_map(owner)
+}
+
+fn owner(exe: &Path) -> Option<&'static str> {
     let path = exe.to_string_lossy();
     if path.contains("/Cellar/") || path.contains("/homebrew/") {
         Some("Homebrew: update it there")
@@ -238,6 +244,19 @@ mod tests {
         // Reached through a link to that root, as a Cargo home that is a link may be.
         std::os::unix::fs::symlink(&local, root.join("link")).unwrap();
         assert_eq!(package_manager(&root.join("link/bin/kraal")), cargo);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_link_into_homebrews_cellar_is_left_to_homebrew() {
+        let root = std::env::temp_dir().join(format!("kraal-brew-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cellar = root.join("Cellar/kraal/0.6.0/bin");
+        std::fs::create_dir_all(&cellar).unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(cellar.join("kraal"), "").unwrap();
+        std::os::unix::fs::symlink(cellar.join("kraal"), root.join("bin/kraal")).unwrap();
+        assert_eq!(package_manager(&root.join("bin/kraal")), Some("Homebrew: update it there"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -2,8 +2,9 @@ name: Release
 
 # A tag v<version> (the version in Cargo.toml) builds kraal for Linux and macOS, publishes a
 # release with one archive per target, its checksum, and SHA256SUMS (install.sh and
-# `kraal update` download from there), then publishes the crate on crates.io. Run by hand, it
-# builds the archives without publishing anything.
+# `kraal update` download from there), then publishes the crate on crates.io, the Homebrew
+# formula and the AUR package (packaging/). Run by hand, it builds the archives without
+# publishing anything.
 
 on:
   push:
@@ -106,3 +107,81 @@ jobs:
       - run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # The Homebrew tap (`brew install <owner>/tap/kraal`, or the repository vars.HOMEBREW_TAP
+  # names): its formula for this release, pushed with a write deploy key of the tap
+  # (secret TAP_DEPLOY_KEY). Without the key, nothing is pushed.
+  homebrew:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+      TAP: ${{ vars.HOMEBREW_TAP || format('{0}/homebrew-tap', github.repository_owner) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::no TAP_DEPLOY_KEY secret: the Homebrew tap is left as it is"
+            exit 0
+          fi
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/tap
+          chmod 600 ~/.ssh/tap
+          curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' > ~/.ssh/known_hosts
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/tap -o IdentitiesOnly=yes"
+          packaging/homebrew/publish.sh "${GITHUB_REF_NAME#v}" SHA256SUMS "$TAP"
+
+  # kraal-bin on the AUR, built by makepkg in Arch first, pushed with the key of the AUR account
+  # (secret AUR_SSH_PRIVATE_KEY; vars.AUR_MAINTAINER heads the PKGBUILD). Without the key, nothing
+  # is pushed.
+  aur:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    permissions:
+      contents: read
+    env:
+      KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      MAINTAINER: ${{ vars.AUR_MAINTAINER }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push the package
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::no AUR_SSH_PRIVATE_KEY secret: the AUR is left as it is"
+            exit 0
+          fi
+          pacman -Syu --noconfirm --needed git openssh
+          # makepkg refuses root.
+          useradd -m builder
+          cp -r packaging /home/builder/packaging
+          curl -fsSL -o /home/builder/SHA256SUMS \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/SHA256SUMS"
+          install -d -m 700 /home/builder/.ssh
+          printf '%s\n' "$KEY" > /home/builder/.ssh/aur
+          chmod 600 /home/builder/.ssh/aur
+          # The host key the AUR publishes on its home page.
+          ssh-keyscan -t ed25519 aur.archlinux.org > /home/builder/.ssh/known_hosts
+          ssh-keygen -lf /home/builder/.ssh/known_hosts > /tmp/aur-host
+          grep -q 'SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4 ' /tmp/aur-host
+          chown -R builder: /home/builder
+          # An account not made yet (or a key not added to it): said, not failed.
+          if ! out=$(sudo -u builder ssh -i /home/builder/.ssh/aur -o IdentitiesOnly=yes aur@aur.archlinux.org help 2>&1); then
+            echo "::warning::the AUR refused the key of AUR_SSH_PRIVATE_KEY (add its public key to the AUR account): $out"
+            exit 0
+          fi
+          sudo -u builder git config --global user.name "github-actions[bot]"
+          sudo -u builder git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          sudo -u builder env MAINTAINER="$MAINTAINER" \
+            GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/aur -o IdentitiesOnly=yes" \
+            sh -c 'cd /home/builder && packaging/aur/publish.sh "$1" SHA256SUMS' sh "${GITHUB_REF_NAME#v}"

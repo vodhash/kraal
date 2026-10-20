@@ -10,7 +10,7 @@ keywords = ["terminal", "multiplexer", "tmux", "ssh", "agents"]
 categories = ["command-line-utilities"]
 rust-version = "1.88"
 # The README's images: crates.io shows them from the repository.
-exclude = ["/assets"]
+exclude = ["/assets", "/packaging"]
 
 [dependencies]
 alacritty_terminal = "0.26"
