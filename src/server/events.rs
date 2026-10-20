@@ -45,6 +45,9 @@ pub const TYPES: &[&str] = &[
     "runbook.started",
     "runbook.finished",
     "command.finished",
+    "pr.checks.failed",
+    "pr.checks.passed",
+    "pr.review",
 ];
 
 /// Events kept for subscribers that ask for what they missed.

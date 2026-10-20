@@ -146,6 +146,14 @@ impl Server {
         let watch = info.as_ref().map(|i| i.watch.as_slice()).unwrap_or_default();
         self.dirwatch.answered(&dir, info.is_some(), watch, Instant::now());
         if self.git.get(&dir) != Some(&info) {
+            // A commit or a push: the pull request may have news.
+            let pushed = |i: &GitInfo| (i.head.clone(), i.upstream.clone(), i.ahead, i.behind);
+            let before = self.git.get(&dir).and_then(|i| i.as_ref()).map(pushed);
+            if let Some(i) = &info
+                && before != Some(pushed(i))
+            {
+                self.pr_soon(i);
+            }
             self.git.insert(dir, info);
             self.mark_dirty();
         }
@@ -387,16 +395,22 @@ impl Server {
         let Some(w) = self.pane_worktree(pane) else {
             let root = &self.pane_git(pane)?.root;
             let repo = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            return Some(Picker::new(PickerKind::Pane, &format!("Worktrees of {repo}"), vec![prune]));
+            let mut items = self.pr_items(pane);
+            let title = if items.is_empty() { format!("Worktrees of {repo}") } else { format!("Repository {repo}") };
+            items.push(prune);
+            return Some(Picker::new(PickerKind::Pane, &title, items));
         };
         let base = if w.base.is_empty() { "the base branch".to_string() } else { w.base.clone() };
         let mut items = vec![
             item("Review changes", format!("diff since it left {base}, uncommitted changes included"), "review"),
             item("Commit everything", "stage all changes and commit (you write the message)".into(), "commit"),
         ];
-        if crate::exec::have_program("gh") {
+        let prs = self.pr_items(pane);
+        let open = self.pane_pr(pane).is_some_and(|p| p.state == crate::review::State::Open);
+        if !open && crate::exec::have_program("gh") {
             items.push(item("Open a pull request", format!("push {} and run gh pr create", w.branch), "pr"));
         }
+        items.extend(prs);
         items.push(item("Merge into base", format!("merge {} into {base} in {}", w.branch, w.repo.display()), "merge"));
         items.push(item("Remove worktree", format!("delete {} and its branch", w.path.display()), "remove"));
         items.push(prune);
@@ -404,6 +418,9 @@ impl Server {
     }
 
     pub(super) fn worktree_op(&mut self, client: ClientId, pane: PaneId, op: &str) -> Mode {
+        if op.starts_with("pr-") {
+            return self.pr_op(client, pane, op);
+        }
         if op == "prune" {
             let dir = self.pane_git(pane).map(|g| g.root.clone()).or_else(|| self.pane_worktree(pane).map(|w| w.repo));
             let Some(dir) = dir else { return Mode::Normal };

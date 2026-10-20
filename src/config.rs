@@ -87,6 +87,9 @@ keys = "context"
 mode = "terminal"
 on_blocked = true
 on_done = true
+# A pull request of a branch a pane is on: its checks fail or pass, a review asks for changes,
+# approves, or leaves new comments (needs `gh`).
+on_pull_request = true
 # A command that ran this many seconds or more and ends in a pane you are not looking at is
 # announced, and waits for you like an agent does. Needs shells that mark their commands
 # (`kraal integration install zsh`, bash or fish). 0 turns it off.
@@ -396,6 +399,7 @@ pub struct NotificationConfig {
     pub mode: NotifyMode,
     pub on_blocked: bool,
     pub on_done: bool,
+    pub on_pull_request: bool,
     /// Seconds a command must run to be announced when it ends unseen; 0 never.
     pub long_command: u64,
 }

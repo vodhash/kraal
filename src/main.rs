@@ -34,6 +34,7 @@ mod persist;
 mod preview;
 mod process;
 mod protocol;
+mod review;
 mod rewrite;
 mod runbooks;
 mod server;

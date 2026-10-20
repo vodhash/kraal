@@ -115,7 +115,12 @@ connected), `production.entered/left` (`entered` again when the reason changes),
 `notification`, `tunnel.up/down`, `port.opened/closed`, `account.limit`, `account.changed` (an
 agent's pane moved to another account, or back with Undo: `account`, `from`, `undo`),
 `runbook.started/finished`, `command.finished` (a command the shell marks ended: its `command`
-line, `exit` status and `seconds`; see [Shell commands](terminal.md#shell-commands)).
+line, `exit` status and `seconds`; see [Shell commands](terminal.md#shell-commands)),
+`pr.checks.failed` and `pr.checks.passed` (the checks of a pull request's last commit:
+`checks`, the names of those that failed) and `pr.review` (`decision`: `changes_requested` or
+`approved`, and/or `comments`: how many new ones). `pr.*` events carry `repo`, `branch`,
+`number` and `url`, and the pane of the agent on that branch when there is one; see
+[Pull requests](agents.md#worktrees).
 
 Duplicating or restoring a closed workspace emits no `workspace.opened` event and runs no
 matching hooks. A successful Open emits it once; selecting an already open workspace does not.
