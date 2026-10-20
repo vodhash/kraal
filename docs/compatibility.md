@@ -2,7 +2,7 @@
 
 ## Saved files and sessions
 
-Kraal 0.5 reads the session and account formats written by 0.4.x. Sessions use
+Kraal 0.6 reads the session and account formats written by 0.4.x and 0.5.x. Sessions use
 `sessions-v2/<session>.json` and `scrollback-v2/<session>/` in the kraal state directory
 (`~/.local/state/kraal`, or `$XDG_STATE_HOME/kraal` when set). Existing workspace KDL and
 configuration files keep working. Each save writes only the current format. Kraal 0.4.0 saved
@@ -14,7 +14,7 @@ Sessions from **0.2.0** and **0.3.0** in `sessions/<session>.json`, without a cu
 `sessions-v2/<session>.json`, are left untouched and refused by start, attach and restore:
 `run kraal 0.4 once first`. Account commands likewise refuse an `accounts.toml` containing
 accounts without identities, with the same next step. Run 0.4 to convert those files before
-returning to 0.5. Kraal keeps migrations for one version only.
+returning to 0.6. Kraal keeps migrations for one version only.
 
 A saved session from a newer format is left untouched and refused with `use a newer kraal`.
 Invalid or unreadable state also prevents restoration; fix the reported file and retry.

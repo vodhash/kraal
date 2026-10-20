@@ -1,6 +1,6 @@
 [package]
 name = "kraal"
-version = "0.5.3"
+version = "0.6.0"
 edition = "2024"
 description = "A terminal workspace manager for SSH fleets and coding agents"
 license = "Apache-2.0"

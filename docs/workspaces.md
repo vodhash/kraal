@@ -392,7 +392,7 @@ Sessions use format 2 in `sessions-v2/<session>.json` with scrollback in
 layout, source links and account references across restarts. Binding account identities
 in retained recipes during ordinary workspace operations remains.
 
-Kraal 0.5 leaves older `sessions/<session>.json` and `scrollback/<session>/` files untouched.
+Kraal 0.5 and later leave older `sessions/<session>.json` and `scrollback/<session>/` files untouched.
 Without a current session file, start, attach and restore refuse old state with
 `run kraal 0.4 once first`. A newer state format is refused with `use a newer kraal`.
 If reading or validating state fails, kraal leaves it in place and refuses to start the session.

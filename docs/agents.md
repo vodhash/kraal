@@ -638,7 +638,7 @@ Kraal edits what it changes and leaves the rest as you wrote it, including comme
 unknown keys. A new file includes an explanatory header and omits empty rules and an empty
 `[claude]` table. A file that cannot be parsed is left untouched. Account commands refuse files
 with accounts without identities, as written by 0.2.0 and 0.3.0, with
-`run kraal 0.4 once first`. Kraal 0.5 does not convert them or create a backup.
+`run kraal 0.4 once first`. Kraal 0.5 and later do not convert them or create a backup.
 Usage is read from `usage/by-id`; old name-based caches are left untouched.
 Account changes do not rewrite saved sessions or external workspace definitions.
 Identity resolution during ordinary account and workspace operations keeps retained references
