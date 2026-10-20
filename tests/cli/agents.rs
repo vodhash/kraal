@@ -499,7 +499,8 @@ exec sleep 100
     let out = env.cmd(&["open", "w"]).env("PATH", &path).env("ANTHROPIC_API_KEY", "server-key").output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let socket = env.root.join("run/kraal/teams.sock");
-    let out = env.cmd(&["agent", "claude", "--teams", "--tab"]).env("KRAAL_SOCKET", &socket).output().unwrap();
+    let out =
+        env.cmd(&["agent", "claude", "--teams", "--remote", "--tab"]).env("KRAAL_SOCKET", &socket).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let lead = String::from_utf8(out.stdout).unwrap().trim().to_string();
     let screen = env.wait_for_text(&lead, "(outside)");
@@ -509,6 +510,7 @@ exec sleep 100
     let (mate, tab) = (mate["id"].to_string(), mate["tab"].clone());
     assert!(screen.contains(&format!("lead %{lead} @{lead} %{lead} %{mate} %")), "{screen}");
     assert!(screen.contains("teams=1 args=") && screen.contains("--teammate-mode auto"), "{screen}");
+    assert!(screen.contains("--remote-control"), "{screen}");
     // Its own tmux: the real one, outside the team's; and no pane outside the team.
     assert!(screen.contains("real-tmux new-session -d -s build TMUX="), "{screen}");
     assert!(screen.contains("%1 is not a pane of this agent team (outside)"), "{screen}");

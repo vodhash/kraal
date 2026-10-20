@@ -119,10 +119,15 @@ pub fn duplicate_args(kind: &AgentKind, args: &[String]) -> Vec<String> {
             }
         }
         kept.push(arg.clone());
-        let (single, several) =
-            if kind.name == "claude" { (CLAUDE_VALUE, CLAUDE_VALUES) } else { (CODEX_VALUE, CODEX_VALUES) };
+        let (single, several, optional) = if kind.name == "claude" {
+            (CLAUDE_VALUE, CLAUDE_VALUES, CLAUDE_OPTIONAL)
+        } else {
+            (CODEX_VALUE, CODEX_VALUES, &[][..])
+        };
         if !attached && single.contains(&flag) {
             kept.extend(args.next().cloned());
+        } else if !attached && optional.contains(&flag) {
+            kept.extend(args.next_if(|v| !v.starts_with('-')).cloned());
         } else if several.contains(&flag) {
             while let Some(value) = args.next_if(|v| !v.starts_with('-')) {
                 kept.push(value.clone());
@@ -176,6 +181,9 @@ const CLAUDE_VALUE: &[&str] = &[
     "-n",
     "--name",
 ];
+/// Claude's options whose value may be left out: a word right after one is its value, as Claude
+/// reads it (`--remote-control Phone` names the session).
+const CLAUDE_OPTIONAL: &[&str] = &["--remote-control", "--rc"];
 /// Claude's options that take no value: a word after one of them is a prompt.
 const CLAUDE_FLAGS: &[&str] = &[
     "--verbose",
@@ -380,6 +388,13 @@ pub fn resumable_args(kind: &AgentKind, args: &[String]) -> Option<(Vec<String>,
             if flags.contains(&name) || (attached && single.contains(&name)) {
                 continue;
             }
+            if kind.name == "claude" && CLAUDE_OPTIONAL.contains(&name) {
+                if let Some(v) = args.get(i).filter(|v| !attached && !v.starts_with('-')) {
+                    kept.push(v.clone());
+                    i += 1;
+                }
+                continue;
+            }
             if single.contains(&name) {
                 kept.extend(args.get(i).cloned());
                 i += 1;
@@ -432,6 +447,7 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
         return None;
     }
     let mut rest: Vec<String> = Vec::new();
+    let mut prompt_left_out = false;
     let args = argv[1..].iter();
     match kind.name {
         "claude" => {
@@ -439,16 +455,26 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
             // value is optional (alone, it opens a picker).
             let mut args = args.peekable();
             while let Some(a) = args.next() {
-                match a.as_str() {
+                let selector = match a.as_str() {
                     "--session-id" => {
                         args.next();
+                        true
                     }
                     "--resume" | "-r" => {
                         args.next_if(|v| !v.starts_with('-'));
+                        true
                     }
-                    "--continue" | "-c" => {}
-                    _ if a.starts_with("--resume=") || a.starts_with("--session-id=") => {}
-                    _ => rest.push(a.clone()),
+                    "--continue" | "-c" => true,
+                    _ => a.starts_with("--resume=") || a.starts_with("--session-id="),
+                };
+                if !selector {
+                    rest.push(a.clone());
+                } else if rest.last().is_some_and(|l| CLAUDE_OPTIONAL.contains(&l.as_str()))
+                    && args.next_if(|v| !v.starts_with('-')).is_some()
+                {
+                    // The selector kept the word after it (a prompt) from being that option's
+                    // value; a resume leaves the prompt out, as `resumable_args` would.
+                    prompt_left_out = true;
                 }
             }
         }
@@ -457,6 +483,7 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
         _ => return None,
     }
     let (kept, exact) = resumable_args(kind, &rest)?;
+    let exact = exact && !prompt_left_out;
     let mut out = vec![program.clone()];
     out.extend(kind.resume.iter().map(|t| t.replace("{session}", session)));
     out.extend(kept);

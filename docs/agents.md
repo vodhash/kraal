@@ -210,6 +210,26 @@ is installed.
 - `--teams` works from a kraal pane, for Claude Code only, and opens the lead in a new pane.
 - Claude Code does not resume teammates: after a restart, a teammate's pane waits for Enter.
 
+## From your phone
+
+Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) puts a Claude
+session on claude.ai/code and in the Claude app: you follow it, answer its questions and approve
+its permission prompts from your phone. kraal keeps its agents running when you close the
+terminal or detach, so they stay there for you.
+
+- `kraal agent claude --remote`, run in a kraal pane, starts Claude on Remote Control in a new
+  pane. kraal keeps it on when it resumes the agent after a restart or moves it to another
+  account. Run outside kraal, it starts Claude in that terminal, which must stay open.
+- To put every Claude session on Remote Control, including the agents you start from kraal's
+  menu or a workspace file, turn on **Enable Remote Control for all sessions** in Claude's
+  `/config`.
+- To be told on your phone when Claude needs you, turn on **Push when actions required** in
+  Claude's `/config`, and sign in to the Claude app with the same account.
+
+Remote Control needs a Claude subscription sign-in (Pro, Max, Team or Enterprise), not an API
+key, and covers Claude Code only. kraal's own questions, such as a production approval, are
+answered in kraal.
+
 ## Worktrees
 
 Panes in a git repository show their branch in their frame (`⎇ main*? ↑2`: `*` changes, `?`
@@ -340,6 +360,7 @@ kraal accounts add claude pro
 | `kraal agent claude` | starts Claude Code on the account the rules pick, in a new pane whose id it prints (in this terminal outside kraal) |
 | `kraal agent codex --account work --right` | on that account, in a split on the right (`--down`, `--floating` and `--tab` place it too; `--here` runs it in this terminal even inside kraal) |
 | `kraal agent claude -- --model opus` | what follows `--` goes to the agent |
+| `kraal agent claude --remote` | Claude Code on Remote Control, to answer it from your phone ([From your phone](#from-your-phone)) |
 | `kraal agent claude --teams` | Claude Code's agent teams, each teammate in a kraal pane ([Claude Code agent teams](#claude-code-agent-teams)) |
 
 When there are no named accounts for the agent, a verified sign-in in `~/.claude` or

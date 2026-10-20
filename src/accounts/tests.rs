@@ -729,6 +729,30 @@ fn agents_started_directly_resume_with_their_arguments() {
         (argv("claude --resume abc --model opus"), true),
         "a picker's -r has no value: the option after it stays"
     );
+    assert_eq!(
+        resume_argv(claude, &argv("claude --model opus --remote-control"), "abc").unwrap(),
+        (argv("claude --resume abc --model opus --remote-control"), true),
+        "kraal agent --remote stays on Remote Control"
+    );
+    assert_eq!(
+        resume_argv(claude, &argv("claude --remote-control Phone --model opus"), "abc").unwrap(),
+        (argv("claude --resume abc --remote-control Phone --model opus"), true),
+        "the word after it names the session"
+    );
+    assert_eq!(resumable_args(claude, &argv("--rc Phone")).unwrap(), (argv("--rc Phone"), true));
+    for run in ["claude --rc -c Fix", "claude --rc --resume old Fix", "claude --rc --session-id=s Fix"] {
+        assert_eq!(resume_argv(claude, &argv(run), "abc").unwrap(), (argv("claude --resume abc --rc"), false), "{run}");
+    }
+    assert_eq!(
+        resume_argv(claude, &argv("claude --mcp-config mcp.json --rc -c Fix --model opus"), "abc").unwrap(),
+        (argv("claude --resume abc --mcp-config mcp.json --rc --model opus"), false),
+        "the prompt is never another option's value either"
+    );
+    assert_eq!(
+        resume_argv(claude, &argv("claude --rc -c -- Fix"), "abc").unwrap(),
+        (argv("claude --resume abc --rc"), false)
+    );
+    assert_eq!(resumable_args(claude, &argv("--rc=Phone fix")).unwrap(), (argv("--rc=Phone"), false), "a prompt");
     assert!(resume_argv(claude, &argv("claude"), "x; rm -rf /").is_none());
     assert!(resume_argv(claude, &argv("vim"), "abc").is_none());
     let codex = agent_kind("codex").unwrap();

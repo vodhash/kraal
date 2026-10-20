@@ -328,6 +328,17 @@ fn run_with(l: &accounts::Launch, exec: bool) -> Result<std::process::ExitStatus
     cmd.status().with_context(|| format!("running {}", l.argv[0]))
 }
 
+/// Claude's arguments with Remote Control on (`kraal agent claude --remote`): before `--`, or
+/// last, where no word after it is taken for the session's name.
+pub(super) fn remote_args(agent: &str, mut args: Vec<String>) -> Result<Vec<String>> {
+    anyhow::ensure!(agent == "claude", "--remote is Claude Code's Remote Control: kraal agent claude --remote");
+    let options = &args[..args.iter().position(|a| a == "--").unwrap_or(args.len())];
+    if !options.iter().any(|a| matches!(a.split('=').next(), Some("--rc" | "--remote-control"))) {
+        args.insert(options.len(), "--remote-control".into());
+    }
+    Ok(args)
+}
+
 /// `kraal agent`: a new agent pane in the session, or the agent here.
 pub(super) fn agent(
     s: &Session,
@@ -637,6 +648,22 @@ pub(super) fn integration(action: &str, agent: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_control_goes_where_it_takes_no_prompt_for_a_name() {
+        let w = |s: &str| s.split(' ').filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>();
+        assert_eq!(remote_args("claude", w("")).unwrap(), w("--remote-control"));
+        assert_eq!(remote_args("claude", w("--model opus fix")).unwrap(), w("--model opus fix --remote-control"));
+        assert_eq!(
+            remote_args("claude", w("--model opus -- fix it")).unwrap(),
+            w("--model opus --remote-control -- fix it")
+        );
+        assert_eq!(remote_args("claude", w("--rc")).unwrap(), w("--rc"));
+        assert_eq!(remote_args("claude", w("--remote-control=Shop")).unwrap(), w("--remote-control=Shop"));
+        assert_eq!(remote_args("claude", w("--rc=Phone")).unwrap(), w("--rc=Phone"));
+        assert_eq!(remote_args("claude", w("-- --rc")).unwrap(), w("--remote-control -- --rc"));
+        assert!(remote_args("codex", w("")).is_err());
+    }
 
     #[test]
     fn worktree_removal_refuses_old_servers_and_allows_absent_servers() {
