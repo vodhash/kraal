@@ -119,10 +119,15 @@ pub fn duplicate_args(kind: &AgentKind, args: &[String]) -> Vec<String> {
             }
         }
         kept.push(arg.clone());
-        let (single, several) =
-            if kind.name == "claude" { (CLAUDE_VALUE, CLAUDE_VALUES) } else { (CODEX_VALUE, CODEX_VALUES) };
+        let (single, several, optional) = if kind.name == "claude" {
+            (CLAUDE_VALUE, CLAUDE_VALUES, CLAUDE_OPTIONAL)
+        } else {
+            (CODEX_VALUE, CODEX_VALUES, &[][..])
+        };
         if !attached && single.contains(&flag) {
             kept.extend(args.next().cloned());
+        } else if !attached && optional.contains(&flag) {
+            kept.extend(args.next_if(|v| !v.starts_with('-')).cloned());
         } else if several.contains(&flag) {
             while let Some(value) = args.next_if(|v| !v.starts_with('-')) {
                 kept.push(value.clone());
@@ -176,6 +181,9 @@ const CLAUDE_VALUE: &[&str] = &[
     "-n",
     "--name",
 ];
+/// Claude's options whose value may be left out: a word right after one is its value, as Claude
+/// reads it (`--remote-control Phone` names the session).
+const CLAUDE_OPTIONAL: &[&str] = &["--remote-control", "--rc"];
 /// Claude's options that take no value: a word after one of them is a prompt.
 const CLAUDE_FLAGS: &[&str] = &[
     "--verbose",
@@ -378,6 +386,13 @@ pub fn resumable_args(kind: &AgentKind, args: &[String]) -> Option<(Vec<String>,
             }
             kept.push(a.clone());
             if flags.contains(&name) || (attached && single.contains(&name)) {
+                continue;
+            }
+            if kind.name == "claude" && CLAUDE_OPTIONAL.contains(&name) {
+                if let Some(v) = args.get(i).filter(|v| !attached && !v.starts_with('-')) {
+                    kept.push(v.clone());
+                    i += 1;
+                }
                 continue;
             }
             if single.contains(&name) {

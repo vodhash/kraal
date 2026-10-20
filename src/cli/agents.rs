@@ -333,7 +333,7 @@ fn run_with(l: &accounts::Launch, exec: bool) -> Result<std::process::ExitStatus
 pub(super) fn remote_args(agent: &str, mut args: Vec<String>) -> Result<Vec<String>> {
     anyhow::ensure!(agent == "claude", "--remote is Claude Code's Remote Control: kraal agent claude --remote");
     let options = &args[..args.iter().position(|a| a == "--").unwrap_or(args.len())];
-    if !options.iter().any(|a| a == "--rc" || a.split('=').next() == Some("--remote-control")) {
+    if !options.iter().any(|a| matches!(a.split('=').next(), Some("--rc" | "--remote-control"))) {
         args.insert(options.len(), "--remote-control".into());
     }
     Ok(args)
@@ -660,6 +660,7 @@ mod tests {
         );
         assert_eq!(remote_args("claude", w("--rc")).unwrap(), w("--rc"));
         assert_eq!(remote_args("claude", w("--remote-control=Shop")).unwrap(), w("--remote-control=Shop"));
+        assert_eq!(remote_args("claude", w("--rc=Phone")).unwrap(), w("--rc=Phone"));
         assert_eq!(remote_args("claude", w("-- --rc")).unwrap(), w("--remote-control -- --rc"));
         assert!(remote_args("codex", w("")).is_err());
     }

@@ -734,6 +734,13 @@ fn agents_started_directly_resume_with_their_arguments() {
         (argv("claude --resume abc --model opus --remote-control"), true),
         "kraal agent --remote stays on Remote Control"
     );
+    assert_eq!(
+        resume_argv(claude, &argv("claude --remote-control Phone --model opus"), "abc").unwrap(),
+        (argv("claude --resume abc --remote-control Phone --model opus"), true),
+        "the word after it names the session"
+    );
+    assert_eq!(resumable_args(claude, &argv("--rc Phone")).unwrap(), (argv("--rc Phone"), true));
+    assert_eq!(resumable_args(claude, &argv("--rc=Phone fix")).unwrap(), (argv("--rc=Phone"), false), "a prompt");
     assert!(resume_argv(claude, &argv("claude"), "x; rm -rf /").is_none());
     assert!(resume_argv(claude, &argv("vim"), "abc").is_none());
     let codex = agent_kind("codex").unwrap();

@@ -217,8 +217,9 @@ session on claude.ai/code and in the Claude app: you follow it, answer its quest
 its permission prompts from your phone. kraal keeps its agents running when you close the
 terminal or detach, so they stay there for you.
 
-- `kraal agent claude --remote` starts Claude on Remote Control. kraal keeps it on when it
-  resumes the agent after a restart or moves it to another account.
+- `kraal agent claude --remote`, run in a kraal pane, starts Claude on Remote Control in a new
+  pane. kraal keeps it on when it resumes the agent after a restart or moves it to another
+  account. Run outside kraal, it starts Claude in that terminal, which must stay open.
 - To put every Claude session on Remote Control, including the agents you start from kraal's
   menu or a workspace file, turn on **Enable Remote Control for all sessions** in Claude's
   `/config`.
