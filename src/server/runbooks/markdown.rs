@@ -298,6 +298,14 @@ impl Server {
         production: Option<crate::server::contexts::Production>,
     ) -> Mode {
         let Some(s) = self.md_sessions.get_mut(&client) else { return Mode::Normal };
+        // Approved for production: a pane that is not any more (its ssh ended, at a local shell
+        // now) gets nothing, the step was meant for production.
+        let target = s.target;
+        if production.is_some() && self.pane_production(target).is_none() {
+            self.toast(client, NoticeKind::Warning, "the pane is no longer production: the step was not sent");
+            return Mode::Normal;
+        }
+        let Some(s) = self.md_sessions.get_mut(&client) else { return Mode::Normal };
         // What the question showed is what is approved: a pane that became production since is
         // asked about again by the check below.
         s.approved = production;
@@ -408,6 +416,12 @@ mod tests {
         assert!(!matches!(server.approve_block(0, 0, None), Mode::Normal));
         let s = &server.md_sessions[&0];
         assert!(s.sent.is_empty() && s.asked_unsure && !s.unsure_ok);
+        // Allowed for production, to a pane that is not any more: nothing is sent.
+        let s = server.md_sessions.get_mut(&0).unwrap();
+        (s.unsure_ok, s.asked_unsure) = (true, true);
+        let prod = crate::server::contexts::Production::new("server db-prod", "server db-prod");
+        assert!(matches!(server.approve_block(0, 0, Some(prod)), Mode::Normal));
+        assert!(server.md_sessions[&0].sent.is_empty(), "sent to a pane no longer production");
         server.panes.get_mut(&target).unwrap().kill();
     }
 }

@@ -424,10 +424,15 @@ pub(super) fn copy(
     Ok(())
 }
 
-/// The production servers among `servers`.
+/// The production servers among `servers`, each with where it is reached: two servers may have
+/// one name (`db` of `ops@db.prod.eu.example.net` and of `db.prod.us.example.net`).
 fn production_names<'a>(cfg: &config::Config, servers: impl IntoIterator<Item = &'a servers::Server>) -> Vec<String> {
     let words = &cfg.production.words;
-    servers.into_iter().filter(|s| crate::context::server_production(s, words)).map(|s| s.name.clone()).collect()
+    servers
+        .into_iter()
+        .filter(|s| crate::context::server_production(s, words))
+        .map(|s| format!("{} ({})", s.name, s.destination()))
+        .collect()
 }
 
 fn remote_servers<'a>(endpoints: impl Iterator<Item = &'a transfer::Endpoint>) -> Vec<&'a servers::Server> {
