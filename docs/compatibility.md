@@ -37,9 +37,12 @@ See [Workspace identities](workspaces.md#workspace-identities) and [Accounts](ag
 
 ## Clients and servers
 
-This version uses protocol 5, which binds a pasted clipboard text to the agent pane that received
-Ctrl+V. Kraal 0.4.1 used protocol 4, Kraal 0.4.0 protocol 3, and Kraal 0.2.0 and 0.3.0 protocol 2.
-Different protocol versions refuse attachment and ordinary commands. There are no older-peer
+This version uses protocol 6, which lets a command run in an agent's pane wait for you to allow a
+production action ([Production](production.md#agents)). Kraal 0.5.x used protocol 5, which binds a
+pasted clipboard text to the agent pane that received Ctrl+V; Kraal 0.4.1 used protocol 4, Kraal
+0.4.0 protocol 3, and Kraal 0.2.0 and 0.3.0 protocol 2.
+Different protocol versions refuse attachment and ordinary commands, and production commands
+that ask the session first ([Production](production.md#agents)). There are no older-peer
 adapters or optional feature negotiation. A refusal names both protocol versions and one next step:
 
 - A newer local client with an old server: `kraal -s main restart`.
@@ -64,7 +67,7 @@ See [Persistence](workspaces.md#persistence).
 Workspaces are saved automatically. KDL is imported and exported explicitly with `kraal import`
 and `kraal export`; `kraal save` and its historical `SaveWorkspace` request are removed.
 Clipboard, file attachments, pasted paths and clipboard images introduced in protocol 3 remain
-part of protocol 5.
+part of protocol 6.
 The client applies its clipboard policy, including the terminal OSC 52 fallback where configured.
 The server no longer emits OSC 52 as an adapter for old clients.
 
@@ -116,16 +119,17 @@ path is removed. The 0.4 saved-file migration is removed in 0.5.
 
 ## The cross-version test
 
-`tests/compat.sh` downloads **0.2.0**, **0.3.0**, **0.4.0** and **0.4.1** and checks their release
-checksums before running `tests/compat.rs` against each real binary. The tests cover protocol
-refusal in both directions when generations differ, saving and stopping old servers, refusal
-of sessions older than 0.4 without changing their files, and restoring and restarting 0.4.x
-sessions with their layout and scrollback. They also check downgrade isolation and that existing
+`tests/compat.sh` downloads **0.2.0**, **0.3.0**, **0.4.0**, **0.4.1** and **0.5.3** and checks their
+release checksums before running `tests/compat.rs` against each real binary. The tests cover
+protocol refusal in both directions when generations differ, production commands refused by an
+older session, saving and stopping old servers, refusal of sessions older than 0.4 without
+changing their files, and restoring and restarting 0.4.x and 0.5.x sessions with their layout and
+scrollback. They also check downgrade isolation and that existing
 workspace and configuration files keep working. CI runs these tests on Linux and macOS.
 
 | Command | Releases |
 |---|---|
-| `tests/compat.sh` | 0.2.0, 0.3.0, 0.4.0 and 0.4.1 |
+| `tests/compat.sh` | 0.2.0, 0.3.0, 0.4.0, 0.4.1 and 0.5.3 |
 | `tests/compat.sh v0.2.0` | 0.2.0 only |
 | `tests/compat.sh --build v0.2.0` | Built from its tag (`git fetch --tags` first) |
 

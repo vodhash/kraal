@@ -334,6 +334,7 @@ fn exec_ssh(target: &str, command: &[String]) -> Result<()> {
     let cfg = config::Config::load()?;
     let known = known_servers(&cfg)?;
     let s = servers::resolve(&known, target).with_context(|| format!("not a server: {target}"))?;
+    approve_production("ssh", production_names(&cfg, [&s]))?;
     let mut args = servers::ssh_args(&s, &known, cfg.servers.multiplex);
     args.push(s.destination());
     args.extend(command.iter().cloned());
@@ -363,6 +364,9 @@ pub(super) fn copy(
     }
     let ssh = |s: &servers::Server| servers::ssh_args(s, &known, cfg.servers.multiplex);
     check_expected(sources.iter().chain([&dest]), expect, &ssh)?;
+    if !dry_run {
+        approve_production("cp", production_names(&cfg, remote_servers(sources.iter().chain([&dest]))))?;
+    }
     let laptop_install = laptop_spool && sources.iter().all(|source| matches!(source, transfer::Endpoint::Local(_)));
     if laptop_spool && !laptop_install {
         anyhow::ensure!(!move_, "a laptop spool download cannot move sources");
@@ -420,6 +424,44 @@ pub(super) fn copy(
     Ok(())
 }
 
+/// The production servers among `servers`.
+fn production_names<'a>(cfg: &config::Config, servers: impl IntoIterator<Item = &'a servers::Server>) -> Vec<String> {
+    let words = &cfg.production.words;
+    servers.into_iter().filter(|s| crate::context::server_production(s, words)).map(|s| s.name.clone()).collect()
+}
+
+fn remote_servers<'a>(endpoints: impl Iterator<Item = &'a transfer::Endpoint>) -> Vec<&'a servers::Server> {
+    endpoints
+        .filter_map(|e| match e {
+            transfer::Endpoint::Remote { server, .. } => Some(server),
+            transfer::Endpoint::Local(_) => None,
+        })
+        .collect()
+}
+
+/// Before this command acts on the production servers named: when it runs in a kraal pane (its
+/// environment, or that of the nearest process it runs under, says so), the session of that pane
+/// asks the user if an agent runs there, whatever `-s` says: only that one knows the agent.
+/// Outside kraal, no agent of kraal's runs it. Any error stops the command.
+fn approve_production(kind: &str, servers: Vec<String>) -> Result<()> {
+    if servers.is_empty() {
+        return Ok(());
+    }
+    let env = crate::process::kraal_env(std::process::id());
+    if env.is_empty() {
+        return Ok(());
+    }
+    let socket = match (env.get("KRAAL_SOCKET"), env.get("KRAAL_SESSION")) {
+        (Some(socket), _) => std::path::PathBuf::from(socket),
+        (None, Some(session)) => paths::socket_path(session),
+        (None, None) => bail!("this runs in a kraal pane whose session kraal cannot tell: nothing was done"),
+    };
+    let ask = Request::ApproveProduction { kind: kind.into(), plan: client::command_line(), servers };
+    client::request(&socket, ask)
+        .map(drop)
+        .map_err(|e| if format!("{e:#}").contains("nothing was done") { e } else { e.context("nothing was done") })
+}
+
 /// `--expect SERVER=SSH`: the file manager listed SERVER through these ssh arguments; refuse
 /// when the inventory now reaches it differently, or no longer knows it by that name (an address
 /// left from a removed entry), so nothing acts on another machine than the one the panel showed.
@@ -428,12 +470,7 @@ fn check_expected<'a>(
     expect: &[String],
     ssh: transfer::SshOptions,
 ) -> Result<()> {
-    let servers: Vec<&servers::Server> = endpoints
-        .filter_map(|e| match e {
-            transfer::Endpoint::Remote { server, .. } => Some(server),
-            transfer::Endpoint::Local(_) => None,
-        })
-        .collect();
+    let servers = remote_servers(endpoints);
     for x in expect {
         let Some((name, args)) = x.split_once('=') else { bail!("--expect {x:?}: SERVER=SSH ARGUMENTS") };
         let found: Vec<&&servers::Server> = servers.iter().filter(|s| s.name == name).collect();
@@ -460,6 +497,7 @@ pub(super) fn remove(args: &[String], expect: &[String]) -> Result<()> {
         args.iter().map(|s| transfer::parse_endpoint(s, &known)).collect::<Result<_>>()?;
     let ssh = |s: &servers::Server| servers::ssh_args(s, &known, cfg.servers.multiplex);
     check_expected(targets.iter(), expect, &ssh)?;
+    approve_production("rm", production_names(&cfg, remote_servers(targets.iter())))?;
     transfer::remove(&targets, &ssh)?;
     eprintln!("deleted {} item{}", targets.len(), if targets.len() == 1 { "" } else { "s" });
     Ok(())
@@ -502,6 +540,7 @@ pub(super) fn exec_fleet(
     let cfg = config::Config::load()?;
     let known = known_servers(&cfg)?;
     let list = resolve_targets(&known, targets)?;
+    approve_production("exec", production_names(&cfg, &list))?;
     let line = command.join(" ");
     let ssh = |s: &servers::Server| servers::ssh_args(s, &known, cfg.servers.multiplex);
     let color = std::io::stdout().is_terminal();

@@ -115,7 +115,13 @@ impl Server {
     /// `kraal buffer paste`: the buffer goes to the pane as a paste, bracketed when its program
     /// asked for that. Whether the pane may get it (production) is the caller's to check.
     pub(super) fn paste_buffer_to(&mut self, pane: PaneId, key: Option<&str>) -> Result<Response, String> {
-        let bytes = self.buffer_paste(pane, &self.buffers.get(key)?.text)?;
+        let text = self.buffers.get(key)?.text.clone();
+        self.paste_text(pane, &text)
+    }
+
+    /// `text` pasted into `pane`, as a buffer is.
+    pub(super) fn paste_text(&mut self, pane: PaneId, text: &str) -> Result<Response, String> {
+        let bytes = self.buffer_paste(pane, text)?;
         self.panes.get_mut(&pane).ok_or("no such pane")?.write_input(bytes);
         Ok(Response::Ok)
     }

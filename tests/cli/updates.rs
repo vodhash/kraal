@@ -117,7 +117,7 @@ fn a_client_with_a_newer_kraal_installed_is_told_the_session_runs_an_older_one()
     env.run(&["open", "w"]);
     let version = env!("CARGO_PKG_VERSION");
     let newer = RawClient::attach_installed(&env, "w", Some("99.0.0"));
-    newer.wait_for_message(&format!(r#"{{"type":"attached","version":"{version}","protocol":5"#));
+    newer.wait_for_message(&format!(r#"{{"type":"attached","version":"{version}","protocol":6"#));
     newer.wait_for_screen(&format!("kraal 99.0.0 installed; this session runs {version}: ctrl+b W r restarts it"));
     let same = RawClient::attach_installed(&env, "w", Some(version));
     same.wait_for_message("\"attached\"");

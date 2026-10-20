@@ -23,7 +23,7 @@ fn a_protocol_three_remote_refusal_names_remote_install_for_the_selected_session
     write_script(&bin.join("ssh"), &format!("#!/bin/sh\ncat '{}'\n", refusal.display()));
     for session in ["main", "work"] {
         let reason = format!(
-            "protocol mismatch: client protocol 5, server protocol 3 (kraal 0.4.0, session {session}); run `kraal -s {session} restart`"
+            "protocol mismatch: client protocol 6, server protocol 3 (kraal 0.4.0, session {session}); run `kraal -s {session} restart`"
         );
         let payload = serde_json::to_vec(&serde_json::json!({ "type": "exit", "reason": reason })).unwrap();
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
@@ -36,7 +36,7 @@ fn a_protocol_three_remote_refusal_names_remote_install_for_the_selected_session
         let shown = in_terminal(command, b"");
         let recovery = if session == "main" { "kraal remote-install box" } else { "kraal -s work remote-install box" };
         assert!(shown.contains(recovery), "{shown}");
-        assert!(shown.contains("client protocol 5, server protocol 3 (kraal 0.4.0"), "{shown}");
+        assert!(shown.contains("client protocol 6, server protocol 3 (kraal 0.4.0"), "{shown}");
         assert!(shown.contains(&format!("session {session}")), "{shown}");
         assert!(!shown.contains(" restart") && !shown.contains("\x1b[?1049h"), "{shown}");
     }
@@ -1977,7 +1977,7 @@ fn attachment_wire_cancellation_disconnect_and_repeated_finish_do_not_paste_part
         raw_frame(
             &mut client.stream,
             0,
-            br#"{"type":"attach","version":5,"cols":120,"rows":40,"workspace":"w","remote":true}"#,
+            br#"{"type":"attach","version":6,"cols":120,"rows":40,"workspace":"w","remote":true}"#,
         );
         client.send(b"\x02 Attach files\r");
         client.wait_for_message("attachment_offer");
@@ -2159,4 +2159,51 @@ esac
             }
         }
     }
+}
+
+/// From a pane whose session cannot be asked (gone here), production commands do nothing: one
+/// that acts from this terminal (with or without the session's socket in its environment), and
+/// one addressed to another session with `-s`, which that session refuses.
+#[test]
+fn production_commands_from_a_pane_whose_session_cannot_be_asked_do_nothing() {
+    let env = Env::new("prod-unasked");
+    let (bin, reached) = (env.root.join("bin"), env.root.join("reached"));
+    std::fs::create_dir_all(&bin).unwrap();
+    write_script(&bin.join("ssh"), &format!("#!/bin/sh\ntouch '{}'\n", reached.display()));
+    std::fs::write(
+        env.root.join("config/kraal/servers.toml"),
+        "[[server]]\nname = \"web-prod-1\"\nhost = \"web-prod-1\"\n",
+    )
+    .unwrap();
+    env.workspace("w", "layout {\n    pane name=\"main\"\n}\n");
+    env.run(&["open", "w"]);
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let from_pane = |args: &[&str]| {
+        env.cmd(args)
+            .env("PATH", &path)
+            .env("KRAAL_SOCKET", env.root.join("run/gone.sock"))
+            .env("KRAAL_SESSION", "gone")
+            .env("KRAAL_PANE", "1")
+            .output()
+            .unwrap()
+    };
+    let cases = [
+        (&["exec", "web-prod-1", "--", "true"][..], "gone.sock"),
+        (&["ssh", "web-prod-1", "--tab", "--", "true"][..], "from a pane of another kraal session"),
+    ];
+    for (args, why) in cases {
+        let out = from_pane(args);
+        assert!(!out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stdout));
+        assert!(String::from_utf8_lossy(&out.stderr).contains(why), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    // Without its socket in the environment, the pane's session is still the one asked.
+    let out = env
+        .cmd(&["exec", "web-prod-1", "--", "true"])
+        .env("PATH", &path)
+        .env("KRAAL_SESSION", "gone")
+        .env("KRAAL_PANE", "1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("gone"));
+    assert!(!reached.exists(), "the command reached the server");
 }

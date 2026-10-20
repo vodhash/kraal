@@ -211,7 +211,7 @@ fn a_restart_wait_given_up_gives_the_terminal_back_once() {
         let mut client = TerminalClient::attach(&env);
         let socket = env.root.join("run/kraal").join(format!("{}.sock", env.session));
         let mut asking = std::os::unix::net::UnixStream::connect(socket).unwrap();
-        raw_frame(&mut asking, 0, br#"{"type":"request","version":5,"request":{"cmd":"kill_server","restart":true}}"#);
+        raw_frame(&mut asking, 0, br#"{"type":"request","version":6,"request":{"cmd":"kill_server","restart":true}}"#);
         client.wait_for("kraal: the session restarts");
         if by_signal {
             client.signal(libc::SIGINT);

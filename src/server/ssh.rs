@@ -63,7 +63,7 @@ impl Server {
         }
         cmd.push(s.destination());
         if !remote.is_empty() {
-            cmd.push(remote.join(" "));
+            cmd.push(remote_command(remote));
         }
         cmd
     }
@@ -125,6 +125,15 @@ impl Server {
         self.spawn_pane_in(ws, target, spec, placement, Some(name))
     }
 
+    /// The servers of `group`, in the inventory's order.
+    pub(super) fn group_members(&self, group: &str) -> Vec<servers::Server> {
+        self.known_servers
+            .iter()
+            .filter(|k| k.server.groups.iter().any(|g| g == group))
+            .map(|k| k.server.clone())
+            .collect()
+    }
+
     /// Open every server of a group in a grid, `max_panes_per_tab` per tab, in a workspace named
     /// after the group (switching to it if it is already open).
     pub fn open_group(&mut self, group: &str, remote: &[String]) -> Result<u32> {
@@ -133,12 +142,7 @@ impl Server {
             self.reopen_workspace(ws)?;
             return Ok(ws);
         }
-        let members: Vec<servers::Server> = self
-            .known_servers
-            .iter()
-            .filter(|k| k.server.groups.iter().any(|g| g == group))
-            .map(|k| k.server.clone())
-            .collect();
+        let members = self.group_members(group);
         anyhow::ensure!(!members.is_empty(), "no server in group {group:?}");
         let per_tab = self.config.servers.max_panes_per_tab.max(1);
         let ws = self.new_workspace(ws_name, None);
@@ -378,6 +382,17 @@ fn read_ssh_config(path: &Path, out: &mut Vec<String>, depth: u8, observe: &mut 
         }
     }
     failed
+}
+
+/// The group `kraal ssh --group` names, with or without its `@`.
+pub(super) fn ssh_group(target: &str) -> &str {
+    target.strip_prefix('@').unwrap_or(target)
+}
+
+/// The line an `ssh` pane runs on the server, as ssh sends it (it joins words with spaces):
+/// what a question about it shows.
+pub(super) fn remote_command(remote: &[String]) -> String {
+    remote.join(" ")
 }
 
 #[cfg(test)]

@@ -208,6 +208,8 @@ pub enum ConfirmAction {
         index: usize,
         production: Option<crate::server::contexts::Production>,
     },
+    /// What an agent asked to do on production ([`Server::show_production_ask`]): let it go on.
+    ApproveProduction(u32),
     /// Input about to reach production panes: approve them for synced typing and send it.
     Production {
         workspace: u32,
@@ -256,6 +258,7 @@ impl ConfirmAction {
                 l
             }
             ConfirmAction::StopAndSwitch { .. } => "Stop and switch".into(),
+            ConfirmAction::ApproveProduction(_) => "Allow".into(),
             ConfirmAction::SignInAccount(_) => "Sign in".into(),
             ConfirmAction::RetryAccountSwitch { .. } => "Check again".into(),
             ConfirmAction::RemoveWorktrees(list) if list.len() == 1 => "Remove worktree".into(),

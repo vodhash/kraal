@@ -33,6 +33,8 @@ pub const TYPES: &[&str] = &[
     "ssh.ended",
     "production.entered",
     "production.left",
+    "production.approved",
+    "production.refused",
     "notification",
     "tunnel.up",
     "tunnel.down",
@@ -64,7 +66,7 @@ fn selected(filters: &[String], ty: &str) -> bool {
     filters.is_empty() || filters.iter().any(|f| matches(f, ty))
 }
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
@@ -266,7 +268,7 @@ fn hooks_log() -> PathBuf {
 
 /// The hooks log, for appending. Commands and what they print may hold secrets (a webhook
 /// token): the file is only ours, in a directory only ours, and never a link placed there.
-fn open_log(log: &Path) -> std::io::Result<std::fs::File> {
+pub(super) fn open_log(log: &Path) -> std::io::Result<std::fs::File> {
     if let Some(dir) = log.parent() {
         crate::paths::ensure_private_dir(dir)?;
     }
