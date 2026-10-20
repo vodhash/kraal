@@ -267,11 +267,16 @@ fn on_socket(lead: &Lead, words: &[String]) -> Result<String> {
         }
         "split-window" | "splitw" => {
             only("dhvlptcPF")?;
+            // Only the pane a teammate starts in: anything else would run with the server's
+            // variables, not the lead's account.
+            if args != ["cat"] {
+                bail!("kraal splits a pane only for a teammate (split-window -- cat)");
+            }
             let format = value('F').unwrap_or_else(|| "#{pane_id}".into());
             expand(&format, &pane, lead)?;
             let opened = lead.request(Request::NewPane {
                 target: Some(pane),
-                command: shell_command(args),
+                command: vec!["cat".into()],
                 cwd: value('c').map(PathBuf::from).or_else(|| std::env::current_dir().ok()),
                 name: None,
                 placement: if has('h') { Placement::Right } else { Placement::Down },
@@ -475,6 +480,8 @@ mod tests {
             "respawn-pane -t %9 -- claude",
             "respawn-pane -k -t %9",
             "kill-pane %9",
+            "split-window -d -- claude -p review",
+            "split-window -d",
             "select-pane -t %9 researcher",
             "split-window -t",
         ] {
