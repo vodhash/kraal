@@ -360,7 +360,8 @@ impl Server {
             ConfirmAction::Edit(ref target) if let Some(why) = &target.production => {
                 let sudo = if target.sudo { " --sudo" } else { "" };
                 let plan = format!("kraal edit{sudo} {}:{}", target.server, target.path);
-                self.record_yours(target.near, "edit", &plan, vec![format!("{} ({why})", target.server)], decision);
+                let server = format!("{} ({})", target.server, crate::server::approvals::audit_why(why));
+                self.record_yours(target.near, "edit", &plan, vec![server], decision);
             }
             ConfirmAction::ApproveProduction(ask) => {
                 self.answer_production_ask(ask, yes);
@@ -388,7 +389,9 @@ impl Server {
                 return Mode::Normal;
             }
             ConfirmAction::RunTool { pane, name, selection, reason, place } => {
-                let server = pane.map(|p| self.prod_label(p, &reason.why)).unwrap_or(reason.why.clone());
+                let server = pane
+                    .map(|p| self.prod_label(p, &reason.why))
+                    .unwrap_or_else(|| crate::server::approvals::audit_why(&reason.why).to_string());
                 self.record_yours(pane, "tool", &name, vec![server], decision);
                 if !yes {
                     return Mode::Normal;

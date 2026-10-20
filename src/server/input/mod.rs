@@ -883,18 +883,20 @@ impl Server {
         pending: PendingInput,
         (asked, paste): (Vec<(PaneId, Production)>, bool),
     ) -> Mode {
-        let Some(wi) = self.ws_index(workspace) else { return Mode::Normal };
-        // Your answer on record, for each production pane the question named. What is typed or
-        // pasted is not: it may be a password.
+        // Your answer on record, for each production pane the question named, even one gone
+        // since. What is typed or pasted is not: it may be a password.
         let decision = if yes { "allowed" } else { "refused" };
         let bytes: usize =
             pending.items.iter().map(|i| if let InputItem::Paste(text) = i { text.len() } else { 0 }).sum();
-        let (kind, plan) =
-            if paste { ("paste", format!("a paste of {bytes} bytes")) } else { ("broadcast", "typing".into()) };
+        let keys = pending.items.iter().filter(|i| matches!(i, InputItem::Key(_))).count();
+        let size =
+            [(keys > 0).then(|| format!("{keys} keys")), (bytes > 0).then(|| format!("a paste of {bytes} bytes"))];
+        let plan = size.into_iter().flatten().collect::<Vec<_>>().join(", ");
         for (p, why) in asked {
             let server = self.prod_label(p, &why.why);
-            self.record_yours(Some(p), kind, &plan, vec![server], decision);
+            self.record_yours(Some(p), if paste { "paste" } else { "broadcast" }, &plan, vec![server], decision);
         }
+        let Some(wi) = self.ws_index(workspace) else { return Mode::Normal };
         if !yes {
             // What the client typed after it waited behind it: it goes too.
             self.drop_held(id);

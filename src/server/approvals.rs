@@ -250,7 +250,10 @@ impl Server {
         d.targets
             .iter()
             .flatten()
-            .filter_map(|t| self.target_production(t, d.pane).map(|p| format!("{} ({})", label(t), p.why)))
+            .filter_map(|t| {
+                let why = self.target_production(t, d.pane)?.why;
+                Some(format!("{} ({})", label(t), if yours { audit_why(&why) } else { &why }))
+            })
             .collect()
     }
 
@@ -286,7 +289,7 @@ impl Server {
 
     /// A production pane in your own lines, with why it is production.
     pub(in crate::server) fn prod_label(&self, pane: PaneId, why: &str) -> String {
-        format!("{} ({why})", self.audit_label(pane))
+        format!("{} ({})", self.audit_label(pane), audit_why(why))
     }
 
     /// Whether the caller may be an agent that is not asked here: one runs in its pane, or it
@@ -608,6 +611,12 @@ impl Server {
     }
 }
 
+/// Why something is production, in your own lines: without the diagnostic in parentheses that
+/// may follow (a kubeconfig's parse error quotes the file, which may hold a token).
+pub(in crate::server) fn audit_why(why: &str) -> &str {
+    why.split(" (").next().unwrap_or(why)
+}
+
 /// The last byte of the file at `path`, not followed if it is a link.
 fn last_byte(path: &std::path::Path) -> std::io::Result<Option<u8>> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -797,6 +806,16 @@ mod tests {
         assert!(line.get("name").is_none(), "{line}");
         let label = format!("{} › pane {} (server prod)", s.server.workspaces[0].name, s.prod);
         assert_eq!(line["servers"], json!([label]));
+    }
+
+    #[test]
+    fn your_lines_leave_diagnostics_out() {
+        let why = "an unknown Kubernetes context (unreadable kubeconfig: invalid type: string \"tok-123\")";
+        assert_eq!(audit_why(why), "an unknown Kubernetes context");
+        assert_eq!(
+            audit_why("Kubernetes context arn:aws:eks:eu-west-1:1:cluster/prod"),
+            "Kubernetes context arn:aws:eks:eu-west-1:1:cluster/prod"
+        );
     }
 
     #[test]
