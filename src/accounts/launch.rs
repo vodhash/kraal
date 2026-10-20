@@ -447,15 +447,13 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
         return None;
     }
     let mut rest: Vec<String> = Vec::new();
+    let mut prompt_left_out = false;
     let args = argv[1..].iter();
     match kind.name {
         "claude" => {
             // Whatever chose the conversation before goes: this one is resumed. `--resume`'s
             // value is optional (alone, it opens a picker).
             let mut args = args.peekable();
-            // An option whose value may be left out, before a selector that goes: the word after
-            // that selector (a prompt) would become its value, so it goes last instead.
-            let mut parked = Vec::new();
             while let Some(a) = args.next() {
                 let selector = match a.as_str() {
                     "--session-id" => {
@@ -471,18 +469,21 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
                 };
                 if !selector {
                     rest.push(a.clone());
-                } else if rest.last().is_some_and(|l| CLAUDE_OPTIONAL.contains(&l.as_str())) {
-                    parked.extend(rest.pop());
+                } else if rest.last().is_some_and(|l| CLAUDE_OPTIONAL.contains(&l.as_str()))
+                    && args.next_if(|v| !v.starts_with('-')).is_some()
+                {
+                    // The selector kept the word after it (a prompt) from being that option's
+                    // value; a resume leaves the prompt out, as `resumable_args` would.
+                    prompt_left_out = true;
                 }
             }
-            let at = rest.iter().position(|a| a == "--").unwrap_or(rest.len());
-            rest.splice(at..at, parked);
         }
         // `codex resume|fork …` is told by [`resumable_args`].
         "codex" => rest.extend(args.cloned()),
         _ => return None,
     }
     let (kept, exact) = resumable_args(kind, &rest)?;
+    let exact = exact && !prompt_left_out;
     let mut out = vec![program.clone()];
     out.extend(kind.resume.iter().map(|t| t.replace("{session}", session)));
     out.extend(kept);

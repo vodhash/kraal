@@ -744,6 +744,11 @@ fn agents_started_directly_resume_with_their_arguments() {
         assert_eq!(resume_argv(claude, &argv(run), "abc").unwrap(), (argv("claude --resume abc --rc"), false), "{run}");
     }
     assert_eq!(
+        resume_argv(claude, &argv("claude --mcp-config mcp.json --rc -c Fix --model opus"), "abc").unwrap(),
+        (argv("claude --resume abc --mcp-config mcp.json --rc --model opus"), false),
+        "the prompt is never another option's value either"
+    );
+    assert_eq!(
         resume_argv(claude, &argv("claude --rc -c -- Fix"), "abc").unwrap(),
         (argv("claude --resume abc --rc"), false)
     );
