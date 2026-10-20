@@ -115,9 +115,9 @@ The same file keeps a line for what you do on production yourself, with `agent` 
 Your lines say what kind of action, where, when and your answer, not what was typed or run, which
 may hold a secret: a paste, typing, `kraal send`, `keys` and `buffer paste` by their size, a
 command by its kind (`kraal exec`, without its arguments), a runbook by its name, a document
-runbook's step by its number, an edit by its file. A pane is named by the name you gave it, else
-by its number, not by the title its program shows. A line that cannot be written is reported, and
-what you do goes on.
+runbook's step by its number, an edit by its file. A pane is named by its number only: its title,
+its name and its workspace's may come from what runs there. A line that cannot be written is
+reported, and what you do goes on.
 
 `kraal exec`, `cp` and `rm` run outside kraal, and `kraal ssh` to a server in the terminal it
 runs in, reach no session, and leave no line.

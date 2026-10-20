@@ -277,14 +277,11 @@ impl Server {
         }
     }
 
-    /// A pane as your own lines name it: by the name you gave it, else by its number; never by
-    /// a title its program set, which may show what was typed.
+    /// A pane as your own lines name it: by its number. Its title, its name and its workspace's
+    /// may come from what runs there (`kraal ssh --group prod -- cmd` names the workspace after
+    /// the command, the shell expanded secrets included).
     pub(in crate::server) fn audit_label(&self, pane: PaneId) -> String {
-        let name = self.panes.get(&pane).and_then(|p| p.name.clone()).unwrap_or_else(|| format!("pane {pane}"));
-        match self.workspace_of(pane) {
-            Some((wi, _)) => format!("{} › {name}", self.workspaces[wi].name),
-            None => name,
-        }
+        format!("pane {pane}")
     }
 
     /// A production pane in your own lines, with why it is production.
@@ -565,12 +562,6 @@ impl Server {
         let mut fields = serde_json::Map::new();
         if let Some(p) = pane {
             fields.insert("pane".into(), json!(p));
-            if let Some(name) = self.panes.get(&p).and_then(|p| p.name.clone()) {
-                fields.insert("name".into(), json!(name));
-            }
-            if let Some((wi, _)) = self.workspace_of(p) {
-                fields.insert("workspace".into(), json!(self.workspaces[wi].name));
-            }
         }
         fields.insert("agent".into(), Value::Null);
         fields.insert("kind".into(), json!(kind));
@@ -802,10 +793,9 @@ mod tests {
         assert!(!log.contains("hunter2"), "{log}");
         let line = logged("\"kind\":\"send\"");
         assert_eq!((line["plan"].as_str(), line["decision"].as_str()), (Some("14 bytes"), Some("yours")));
-        // Named by its number, not by a title its program may set from what it reads.
-        assert!(line.get("name").is_none(), "{line}");
-        let label = format!("{} › pane {} (server prod)", s.server.workspaces[0].name, s.prod);
-        assert_eq!(line["servers"], json!([label]));
+        // Named by its number, not by a title, a name or a workspace's name what runs may set.
+        assert!(line.get("name").is_none() && line.get("workspace").is_none(), "{line}");
+        assert_eq!(line["servers"], json!([format!("pane {} (server prod)", s.prod)]));
     }
 
     #[test]
