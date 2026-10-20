@@ -167,7 +167,7 @@ impl Server {
             let act = Act::Input { pane: p, production, input };
             Ok(Some(Need { kind: kind.into(), plan, servers, reach: Vec::new(), act }))
         };
-        let server = |s: &crate::servers::Server| format!("{} ({})", s.name, s.destination());
+        let server = |s: &crate::servers::Server| format!("{} ({})", s.name, s.address());
         match req {
             Request::ApproveProduction { kind, plan, servers } => Ok(Some(Need {
                 kind: kind.clone(),
@@ -243,8 +243,11 @@ impl Server {
     /// The production targets of a runbook's plan, each with why it is production; named as your
     /// own lines name panes when they are `yours`.
     pub(in crate::server) fn runbook_production(&self, d: &super::runbooks::Draft, yours: bool) -> Vec<String> {
-        let label = |t: &super::runbooks::Target| match t {
-            super::runbooks::Target::Pane(p) if yours && self.pane_server(*p).is_none() => self.audit_label(*p),
+        use super::runbooks::Target;
+        let reached = |s: &crate::servers::Server| format!("{} ({})", s.name, s.address());
+        let label = |t: &Target| match t {
+            Target::Server(s) if yours => reached(s),
+            Target::Pane(p) if yours => self.pane_server(*p).map_or_else(|| self.audit_label(*p), |s| reached(&s)),
             _ => self.target_label(t),
         };
         d.targets

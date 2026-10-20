@@ -424,14 +424,14 @@ pub(super) fn copy(
     Ok(())
 }
 
-/// The production servers among `servers`, each with where it is reached: two servers may have
-/// one name (`db` of `ops@db.prod.eu.example.net` and of `db.prod.us.example.net`).
+/// The production servers among `servers`, each with where it is reached, port included: two
+/// servers may have one name (`db` of `ops@db.prod.eu.example.net` and of `db.prod.us.example.net`).
 fn production_names<'a>(cfg: &config::Config, servers: impl IntoIterator<Item = &'a servers::Server>) -> Vec<String> {
     let words = &cfg.production.words;
     servers
         .into_iter()
         .filter(|s| crate::context::server_production(s, words))
-        .map(|s| format!("{} ({})", s.name, s.destination()))
+        .map(|s| format!("{} ({})", s.name, s.address()))
         .collect()
 }
 
@@ -631,6 +631,20 @@ pub(super) fn tunnel(s: &Session, action: TunnelCmd) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_servers_are_told_apart_by_where_they_are_reached() {
+        let cfg = config::Config::default();
+        let at = |port| servers::Server {
+            name: "db".into(),
+            host: "db.prod.example.net".into(),
+            user: Some("ops".into()),
+            port: Some(port),
+            ..Default::default()
+        };
+        let names = production_names(&cfg, [&at(2201), &at(2202)]);
+        assert_eq!(names, ["db (ops@db.prod.example.net:2201)", "db (ops@db.prod.example.net:2202)"]);
+    }
 
     #[test]
     fn attach_refusal_preserves_the_explicit_destination() {
