@@ -112,10 +112,13 @@ The same file keeps a line for what you do on production yourself, with `agent` 
   `--production`, and `kraal runbook run` on production targets, from a pane or from outside
   kraal.
 
-What a paste or typing holds is never written there: it may be a password. A paste is told by its
-size. A line that cannot be written is reported, and what you do goes on.
+What a paste, typing, `kraal send`, `keys` or `buffer paste` holds is never written there: it may
+be a password. They are told by their size. Commands, runbook plans and steps are written as they
+run, as your shell's history keeps them (a runbook masks its `secret` parameters): keep secrets
+out of command lines. A line that cannot be written is reported, and what you do goes on.
 
-`kraal exec`, `cp`, `rm` and `ssh` run outside kraal reach no session, and leave no line.
+`kraal exec`, `cp` and `rm` run outside kraal, and `kraal ssh` to a server in the terminal it
+runs in, reach no session, and leave no line.
 
 Anything else an agent runs is out of kraal's sight: `ssh`, `kubectl`, `aws` or `terraform` run
 directly, `kraal run`, which starts any command in a new pane without looking at it, and a

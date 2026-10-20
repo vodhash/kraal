@@ -62,12 +62,25 @@ pub struct Draft {
     choices: Option<Vec<String>>,
     /// Where the plan shown said it runs (each target's identity): it runs there or not at all.
     reviewed: Option<Vec<String>>,
+    /// The plan shown and its production targets then, for the production log.
+    pub asked: Option<(String, Vec<String>)>,
 }
 
 impl Draft {
     fn new(runbook: Runbook, steps: Steps, pane: Option<PaneId>, targets: Option<Vec<Target>>) -> Draft {
         let trusted = runbooks::trusted(&runbook);
-        Draft { id: 0, runbook, steps, pane, targets, values: Vec::new(), trusted, choices: None, reviewed: None }
+        Draft {
+            id: 0,
+            runbook,
+            steps,
+            pane,
+            targets,
+            values: Vec::new(),
+            trusted,
+            choices: None,
+            reviewed: None,
+            asked: None,
+        }
     }
 
     pub(in crate::server) fn runbook_name(&self) -> &str {

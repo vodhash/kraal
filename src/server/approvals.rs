@@ -116,7 +116,14 @@ impl Server {
                     Place::Pane(pane) => Some(pane),
                     Place::Elsewhere | Place::Outside => None,
                 };
-                self.record_yours(pane, &need.kind, &need.plan, need.servers, "yours");
+                // What is typed or pasted is not written: it may be a password.
+                let plan = match &need.act {
+                    Act::Input { input: Input::Text(text), .. } => format!("{} bytes", text.len()),
+                    Act::Input { input: Input::Keys(keys), .. } => format!("{} keys", keys.len()),
+                    Act::Input { input: Input::Paste(text), .. } => format!("a paste of {} bytes", text.len()),
+                    _ => need.plan.clone(),
+                };
+                self.record_yours(pane, &need.kind, &plan, need.servers, "yours");
             }
             return Ok((reply, req));
         }
@@ -717,6 +724,12 @@ mod tests {
 
     #[test]
     fn a_production_action_outside_an_agents_pane_goes_on_at_once() {
+        // Its log lines carry no marker of their own: no other test of this process may write.
+        if !crate::testing::in_own_process(
+            "server::approvals::tests::a_production_action_outside_an_agents_pane_goes_on_at_once",
+        ) {
+            return;
+        }
         let mut s = setup();
         let (shell, _peer, _receive) = caller(&mut s.server, s.shell);
         let outcome = s.server.request(shell, exec("outside-agent"));
@@ -727,6 +740,15 @@ mod tests {
         assert_eq!((line["decision"].as_str(), line["agent"].is_null()), (Some("yours"), true));
         assert_eq!((line["kind"].as_str(), &line["pane"]), (Some("exec"), &json!(s.shell)));
         assert_eq!(line["servers"], json!(["web-prod-1"]));
+        // What you send is not written: it may be a password.
+        let (shell, _peer, _receive) = caller(&mut s.server, s.shell);
+        let send = Request::SendText { pane: s.prod.to_string(), text: "hunter2-yours\n".into(), production: true };
+        let outcome = s.server.request(shell, send);
+        assert!(matches!(immediate(&mut s.server, outcome), Ok(Response::Ok)));
+        let log = std::fs::read_to_string(production_log()).unwrap();
+        assert!(!log.contains("hunter2"), "{log}");
+        let line = logged("\"kind\":\"send\"");
+        assert_eq!((line["plan"].as_str(), line["decision"].as_str()), (Some("14 bytes"), Some("yours")));
     }
 
     #[test]

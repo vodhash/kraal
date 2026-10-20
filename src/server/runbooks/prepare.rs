@@ -36,8 +36,10 @@ impl Server {
         let Some(param) = d.steps.params.get(d.values.len()).cloned() else {
             let message = self.plan(d, false);
             let reviewed = self.identities(d);
+            let production = self.runbook_production(d);
             if let Some(d) = self.drafts.get_mut(&client) {
                 d.reviewed = Some(reviewed);
+                d.asked = Some((message.clone(), production));
             }
             return Mode::confirm(message, ConfirmAction::RunRunbook);
         };

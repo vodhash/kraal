@@ -357,24 +357,20 @@ impl Server {
             ConfirmAction::Production { workspace, approve, pending } => {
                 return self.answer_production(id, yes, workspace, approve, pending);
             }
-            ConfirmAction::Edit(ref target) => {
+            ConfirmAction::Edit(ref target, Some(ref why)) => {
                 let sudo = if target.sudo { " --sudo" } else { "" };
                 let plan = format!("kraal edit{sudo} {}:{}", target.server, target.path);
-                let server =
-                    format!("{} ({})", target.server, target.ssh.last().map(String::as_str).unwrap_or_default());
-                self.record_yours(target.near, "edit", &plan, vec![server], decision);
+                self.record_yours(target.near, "edit", &plan, vec![format!("{} ({why})", target.server)], decision);
             }
             ConfirmAction::ApproveProduction(ask) => {
                 self.answer_production_ask(ask, yes);
                 return Mode::Normal;
             }
             ConfirmAction::RunRunbook => {
-                if let Some(d) = self.drafts.get(&id) {
-                    let servers = self.runbook_production(d);
-                    if !servers.is_empty() {
-                        let (pane, plan) = (d.pane, self.plan(d, true));
-                        self.record_yours(pane, "runbook", &plan, servers, decision);
-                    }
+                if let Some(d) = self.drafts.get(&id)
+                    && let Some((plan, servers)) = d.asked.clone().filter(|(_, servers)| !servers.is_empty())
+                {
+                    self.record_yours(d.pane, "runbook", &plan, servers, decision);
                 }
                 self.confirm_runbook(id, yes);
                 return Mode::Normal;
@@ -424,7 +420,7 @@ impl Server {
                     | ConfirmAction::RunTool { .. } => {
                         unreachable!("answered above")
                     }
-                    ConfirmAction::Edit(target) => self.start_edit(Some(id), *target, None),
+                    ConfirmAction::Edit(target, _) => self.start_edit(Some(id), *target, None),
                     ConfirmAction::ClosePane(p) => self.close_pane(p),
                     ConfirmAction::CloseTab { workspace, tab } => {
                         if let Some(wi) = self.ws_index(workspace)

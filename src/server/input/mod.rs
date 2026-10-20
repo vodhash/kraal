@@ -876,13 +876,15 @@ impl Server {
         // Your answer on record, for each production pane it is about. What is pasted is not:
         // it may be a password.
         let decision = if yes { "allowed" } else { "refused" };
-        let (kind, about): (&str, Vec<(PaneId, &Production)>) = if approve.is_empty() {
+        let bytes: usize =
+            pending.items.iter().map(|i| if let InputItem::Paste(text) = i { text.len() } else { 0 }).sum();
+        // A paste is asked about for every production pane it goes to; typing, for those that
+        // were not approved yet.
+        let (kind, about): (&str, Vec<(PaneId, &Production)>) = if bytes > 0 || approve.is_empty() {
             ("paste", pending.targets.iter().filter_map(|(p, why)| why.as_ref().map(|why| (*p, why))).collect())
         } else {
             ("broadcast", approve.iter().map(|(p, why)| (*p, why)).collect())
         };
-        let bytes: usize =
-            pending.items.iter().map(|i| if let InputItem::Paste(text) = i { text.len() } else { 0 }).sum();
         let plan = if bytes > 0 { format!("a paste of {bytes} bytes") } else { "typing".into() };
         let records: Vec<(PaneId, String)> =
             about.into_iter().map(|(p, why)| (p, format!("{} ({})", self.pane_label(p), why.why))).collect();
@@ -1208,6 +1210,11 @@ mod tests {
     /// Your answer about a paste into production is on record, without what was pasted.
     #[test]
     fn a_production_paste_answer_is_logged_without_its_text() {
+        // Its log is read for its last line: no other test of this process may write there.
+        if !crate::testing::in_own_process("server::input::tests::a_production_paste_answer_is_logged_without_its_text")
+        {
+            return;
+        }
         let (tx, _events) = queue::channel(4096);
         let mut server = server(tx);
         let (id, _peer) = client(&mut server);

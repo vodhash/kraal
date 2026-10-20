@@ -147,7 +147,7 @@ impl Server {
                 target.server,
                 if target.sudo { " as root" } else { "" }
             );
-            return Mode::confirm(message, ConfirmAction::Edit(Box::new(target)));
+            return Mode::confirm(message, ConfirmAction::Edit(Box::new(target), Some(why.why)));
         }
         self.start_edit(Some(client), target, None);
         Mode::Normal
@@ -289,7 +289,9 @@ impl Server {
                 target.server
             );
             let target = EditTarget { sudo: true, ..target };
-            self.set_mode_if_idle(c, Mode::confirm(message, ConfirmAction::Edit(Box::new(target))));
+            let production =
+                self.resolve_server(&target.server).and_then(|s| self.server_production(&s)).map(|p| p.why);
+            self.set_mode_if_idle(c, Mode::confirm(message, ConfirmAction::Edit(Box::new(target), production)));
             return;
         }
         let result =
