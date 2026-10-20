@@ -96,6 +96,32 @@ the agent, the command, the production panes and servers and the decision (`allo
 `refused: nobody attached`, `refused: changed while asked`). An approval that cannot be written
 there runs nothing. Hooks and `kraal events` get `production.approved` or `production.refused`.
 
+## What you do on production
+
+The same file keeps a line for what you do on production yourself, with `agent` null:
+
+- your answers to kraal's questions (above): typing broadcast to a production pane
+  (`broadcast`), a paste into one (`paste`), a tool on one (`tool`), a production server's file
+  in your editor (`edit`), a runbook with production targets (`runbook`) and a step of a document
+  runbook typed into a production pane (`runbook block`), each `allowed` or `refused`. A line is
+  your answer: when what it was about changed before anything was sent, nothing is sent and kraal
+  tells you;
+- what kraal does not ask you about, as `yours`: `kraal exec`, `cp` and `rm` on production
+  servers and `kraal ssh` to one, run from a pane of the session, and `kraal ssh` with a command
+  that opens panes on production servers, `kraal send`, `keys`, `buffer paste` and `edit` with
+  `--production`, and `kraal runbook run` on production targets, from a pane or from outside
+  kraal.
+
+Your lines say what kind of action, where, when and your answer, not what was typed or run, which
+may hold a secret: a paste, typing, `kraal send`, `keys` and `buffer paste` by their size, a
+command by its kind (`kraal exec`, without its arguments), a runbook by its name, a document
+runbook's step by its number, an edit by its file. A pane is named by its number only: its title,
+its name and its workspace's may come from what runs there. A line that cannot be written is
+reported, and what you do goes on.
+
+`kraal exec`, `cp` and `rm` run outside kraal, and `kraal ssh` to a server in the terminal it
+runs in, reach no session, and leave no line.
+
 Anything else an agent runs is out of kraal's sight: `ssh`, `kubectl`, `aws` or `terraform` run
 directly, `kraal run`, which starts any command in a new pane without looking at it, and a
 command that both left the pane's processes (its parents gone) and has the `KRAAL_` variables

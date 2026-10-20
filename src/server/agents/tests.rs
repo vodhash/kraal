@@ -1266,6 +1266,12 @@ fn undo_is_saved_only_with_a_started_change_and_survives_resuming_the_pane() {
     assert!(t.server.messages.is_empty(), "preparing a command is not success");
     t.server.switch_started(1);
     assert!(t.server.switches.pending.is_empty());
+    let changed = t.server.events.kept.iter().rev().find(|e| e["type"] == "account.changed").expect("an event");
+    assert_eq!(
+        (&changed["pane"], &changed["from"], &changed["undo"]),
+        (&serde_json::json!(1), &serde_json::json!("from"), &serde_json::json!(false))
+    );
+    assert_eq!((&changed["agent"], changed["account"].is_string()), (&serde_json::json!("claude"), true));
     assert!(!t.server.limit_alerts.contains_key(&1), "the new account has its own threshold crossing");
     let spec = &t.server.panes[&1].spec;
     let saved = spec.account_undo.as_ref().unwrap();

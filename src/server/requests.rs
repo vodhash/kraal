@@ -248,7 +248,16 @@ impl Server {
                 let viewer = viewer.or_else(|| self.clients.values().find(shows).map(|c| c.id)).or(self.primary);
                 let mut ssh = self.ssh_options(&server);
                 ssh.push(server.destination());
-                let target = super::edits::EditTarget { server: server.name.clone(), ssh, path, line, ws, near, sudo };
+                let target = super::edits::EditTarget {
+                    server: server.name.clone(),
+                    ssh,
+                    path,
+                    line,
+                    ws,
+                    near,
+                    sudo,
+                    production: None,
+                };
                 self.start_edit(viewer, target, Some(reply));
                 return RequestOutcome::Deferred;
             }

@@ -267,6 +267,7 @@ impl Server {
             return Mode::Confirm(q);
         }
         let action = q.action;
+        let decision = if yes { "allowed" } else { "refused" };
         match action {
             ConfirmAction::RetrySsh(pane) => {
                 if yes {
@@ -353,24 +354,45 @@ impl Server {
                 self.confirm_switch(pane, token, id, yes);
                 return Mode::Normal;
             }
-            ConfirmAction::Production { workspace, approve, pending } => {
-                return self.answer_production(id, yes, workspace, approve, pending);
+            ConfirmAction::Production { workspace, approve, pending, asked, paste } => {
+                return self.answer_production(id, yes, workspace, approve, pending, (asked, paste));
+            }
+            ConfirmAction::Edit(ref target) if let Some(why) = &target.production => {
+                let sudo = if target.sudo { " --sudo" } else { "" };
+                let plan = format!("kraal edit{sudo} {}:{}", target.server, target.path);
+                let server = format!("{} ({})", target.server, crate::server::approvals::audit_why(why));
+                self.record_yours(target.near, "edit", &plan, vec![server], decision);
             }
             ConfirmAction::ApproveProduction(ask) => {
                 self.answer_production_ask(ask, yes);
                 return Mode::Normal;
             }
             ConfirmAction::RunRunbook => {
+                if let Some(d) = self.drafts.get(&id)
+                    && let Some((plan, servers)) = d.asked.clone().filter(|(_, servers)| !servers.is_empty())
+                {
+                    self.record_yours(d.pane, "runbook", &plan, servers, decision);
+                }
                 self.confirm_runbook(id, yes);
                 return Mode::Normal;
             }
-            ConfirmAction::RunBlock { index, production } => return self.confirm_block(id, index, production, yes),
+            ConfirmAction::RunBlock { index, production } => {
+                if let Some((pane, plan)) = production.as_ref().and_then(|_| self.block_record(id, index)) {
+                    let server = self.prod_label(pane, &production.as_ref().unwrap().why);
+                    self.record_yours(Some(pane), "runbook block", &plan, vec![server], decision);
+                }
+                return self.confirm_block(id, index, production, yes);
+            }
             ConfirmAction::TrustRunbook => return self.confirm_trust(id, yes),
             ConfirmAction::TrustWorktreeSetup(new) => {
                 self.confirm_worktree_setup(id, *new, yes);
                 return Mode::Normal;
             }
             ConfirmAction::RunTool { pane, name, selection, reason, place } => {
+                let server = pane
+                    .map(|p| self.prod_label(p, &reason.why))
+                    .unwrap_or_else(|| crate::server::approvals::audit_why(&reason.why).to_string());
+                self.record_yours(pane, "tool", &name, vec![server], decision);
                 if !yes {
                     return Mode::Normal;
                 }

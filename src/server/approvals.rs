@@ -110,6 +110,15 @@ impl Server {
             Place::Elsewhere | Place::Outside => None,
         };
         if agent.is_none() && !matches!(place, Place::Elsewhere) {
+            // Yours: not asked, but on record.
+            if let Ok(Some(need)) = self.production_need(&req) {
+                let pane = match place {
+                    Place::Pane(pane) => Some(pane),
+                    Place::Elsewhere | Place::Outside => None,
+                };
+                let (plan, servers) = self.yours(&req, &need);
+                self.record_yours(pane, &need.kind, &plan, servers, "yours");
+            }
             return Ok((reply, req));
         }
         let need = match self.production_need(&req) {
@@ -117,6 +126,16 @@ impl Server {
             Ok(None) => return Ok((reply, req)),
             Err(e) => return Err(RequestOutcome::Immediate { reply, result: Err(format!("{e}: nothing was done")) }),
         };
+        if let Request::RunbookRun { token } = &req
+            && let Some((_, d)) = self.plans.get(token)
+            && !d.listed().is_empty()
+        {
+            let error = format!(
+                "{} lists choices with commands and acts on production: from an agent's pane, those commands would run before you are asked; run it yourself: nothing was done",
+                d.runbook_name()
+            );
+            return Err(RequestOutcome::Immediate { reply, result: Err(error) });
+        }
         // Only the session of the agent's pane knows the agent, and asks about it.
         let Some((pane, agent)) = agent else {
             let session = &self.session;
@@ -148,7 +167,7 @@ impl Server {
             let act = Act::Input { pane: p, production, input };
             Ok(Some(Need { kind: kind.into(), plan, servers, reach: Vec::new(), act }))
         };
-        let server = |s: &crate::servers::Server| format!("{} ({})", s.name, s.destination());
+        let server = |s: &crate::servers::Server| format!("{} ({})", s.name, s.address());
         match req {
             Request::ApproveProduction { kind, plan, servers } => Ok(Some(Need {
                 kind: kind.clone(),
@@ -207,22 +226,7 @@ impl Server {
             }
             Request::RunbookRun { token } => {
                 let (_, d) = self.plans.get(token).ok_or("no such plan: review the runbook again")?;
-                let targets: Vec<_> = d.targets.iter().flatten().collect();
-                let production = targets.iter().any(|t| self.target_production(t, d.pane).is_some());
-                if production && !d.listed().is_empty() {
-                    return Err(format!(
-                        "{} lists choices with commands and acts on production: from an agent's pane, those commands would run before you are asked; run it yourself",
-                        d.runbook_name()
-                    ));
-                }
-                let servers: Vec<String> = d
-                    .targets
-                    .iter()
-                    .flatten()
-                    .filter_map(|t| {
-                        self.target_production(t, d.pane).map(|p| format!("{} ({})", self.target_label(t), p.why))
-                    })
-                    .collect();
+                let servers = self.runbook_production(d, false);
                 Ok((!servers.is_empty()).then(|| Need {
                     kind: "runbook".into(),
                     plan: self.plan(d, true),
@@ -234,6 +238,58 @@ impl Server {
             }
             _ => Ok(None),
         }
+    }
+
+    /// The production targets of a runbook's plan, each with why it is production; named as your
+    /// own lines name panes when they are `yours`.
+    pub(in crate::server) fn runbook_production(&self, d: &super::runbooks::Draft, yours: bool) -> Vec<String> {
+        use super::runbooks::Target;
+        let reached = |s: &crate::servers::Server| format!("{} ({})", s.name, s.address());
+        let label = |t: &Target| match t {
+            Target::Server(s) if yours => reached(s),
+            Target::Pane(p) if yours => self.pane_server(*p).map_or_else(|| self.audit_label(*p), |s| reached(&s)),
+            _ => self.target_label(t),
+        };
+        d.targets
+            .iter()
+            .flatten()
+            .filter_map(|t| {
+                let why = self.target_production(t, d.pane)?.why;
+                Some(format!("{} ({})", label(t), if yours { audit_why(&why) } else { &why }))
+            })
+            .collect()
+    }
+
+    /// Your `need` as its line says it: what and where, never what is typed or run there (nor a
+    /// command's arguments, which the shell expanded): it may hold a secret.
+    fn yours(&self, req: &Request, need: &Need) -> (String, Vec<String>) {
+        if let Act::Input { pane, production, input } = &need.act {
+            let size = match input {
+                Input::Text(text) => format!("{} bytes", text.len()),
+                Input::Keys(keys) => format!("{} keys", keys.len()),
+                Input::Paste(text) => format!("a paste of {} bytes", text.len()),
+            };
+            return (size, vec![self.prod_label(*pane, &production.why)]);
+        }
+        match req {
+            Request::RunbookRun { token } if let Some((_, d)) = self.plans.get(token) => {
+                (d.runbook_name().to_string(), self.runbook_production(d, true))
+            }
+            Request::EditRemote { .. } => (need.plan.clone(), need.servers.clone()),
+            _ => (format!("kraal {}", need.kind), need.servers.clone()),
+        }
+    }
+
+    /// A pane as your own lines name it: by its number. Its title, its name and its workspace's
+    /// may come from what runs there (`kraal ssh --group prod -- cmd` names the workspace after
+    /// the command, the shell expanded secrets included).
+    pub(in crate::server) fn audit_label(&self, pane: PaneId) -> String {
+        format!("pane {pane}")
+    }
+
+    /// A production pane in your own lines, with why it is production.
+    pub(in crate::server) fn prod_label(&self, pane: PaneId, why: &str) -> String {
+        format!("{} ({})", self.audit_label(pane), audit_why(why))
     }
 
     /// Whether the caller may be an agent that is not asked here: one runs in its pane, or it
@@ -495,15 +551,44 @@ impl Server {
         Value::Object(fields)
     }
 
-    /// Append the answer about `ask` to the production log, a whole line under the lock that
-    /// sessions writing the same file share.
+    /// Your own action on production, or your answer to kraal's question about one (`allowed`,
+    /// `refused`; `yours` when kraal does not ask), on record. A line that cannot be written is
+    /// only reported: what you do yourself goes on.
+    pub(in crate::server) fn record_yours(
+        &mut self,
+        pane: Option<PaneId>,
+        kind: &str,
+        plan: &str,
+        servers: Vec<String>,
+        decision: &str,
+    ) {
+        let mut fields = serde_json::Map::new();
+        if let Some(p) = pane {
+            fields.insert("pane".into(), json!(p));
+        }
+        fields.insert("agent".into(), Value::Null);
+        fields.insert("kind".into(), json!(kind));
+        fields.insert("plan".into(), json!(plan));
+        fields.insert("servers".into(), json!(servers));
+        fields.insert("decision".into(), json!(decision));
+        if let Err(e) = self.append_production_log(fields) {
+            self.warnings.push(format!("{}: {e}", production_log().display()));
+        }
+    }
+
+    /// Append the answer about `ask` to the production log.
     fn log_production(&self, ask: &ProductionAsk, decision: &str) -> std::io::Result<()> {
+        let Value::Object(fields) = self.production_fields(ask, decision) else { unreachable!() };
+        self.append_production_log(fields)
+    }
+
+    /// Append `fields`, with when and the session, to the production log: a whole line under
+    /// the lock that sessions writing the same file share.
+    fn append_production_log(&self, fields: serde_json::Map<String, Value>) -> std::io::Result<()> {
         let mut line = serde_json::Map::new();
         line.insert("time".into(), json!(super::events::now_ms()));
         line.insert("session".into(), json!(self.session));
-        if let Value::Object(fields) = self.production_fields(ask, decision) {
-            line.extend(fields);
-        }
+        line.extend(fields);
         let mut text = format!("{}\n", Value::Object(line));
         let log = production_log();
         if let Some(dir) = log.parent() {
@@ -518,6 +603,12 @@ impl Server {
             f.write_all(text.as_bytes())
         })?
     }
+}
+
+/// Why something is production, in your own lines: without the diagnostic in parentheses that
+/// may follow (a kubeconfig's parse error quotes the file, which may hold a token).
+pub(in crate::server) fn audit_why(why: &str) -> &str {
+    why.split(" (").next().unwrap_or(why)
 }
 
 /// The last byte of the file at `path`, not followed if it is a link.
@@ -679,11 +770,45 @@ mod tests {
 
     #[test]
     fn a_production_action_outside_an_agents_pane_goes_on_at_once() {
+        // Its log lines carry no marker of their own: no other test of this process may write.
+        if !crate::testing::in_own_process(
+            "server::approvals::tests::a_production_action_outside_an_agents_pane_goes_on_at_once",
+        ) {
+            return;
+        }
         let mut s = setup();
         let (shell, _peer, _receive) = caller(&mut s.server, s.shell);
         let outcome = s.server.request(shell, exec("outside-agent"));
         assert!(matches!(immediate(&mut s.server, outcome), Ok(Response::Ok)));
         assert_eq!(asking(&s.server, s.ui), None);
+        // Yours, on record all the same.
+        let line = logged("\"kind\":\"exec\"");
+        assert_eq!((line["decision"].as_str(), line["agent"].is_null()), (Some("yours"), true));
+        assert_eq!((line["plan"].as_str(), &line["pane"]), (Some("kraal exec"), &json!(s.shell)));
+        assert_eq!(line["servers"], json!(["web-prod-1"]));
+        assert!(!std::fs::read_to_string(production_log()).unwrap().contains("outside-agent"), "no arguments");
+        // What you send is not written: it may be a password.
+        let (shell, _peer, _receive) = caller(&mut s.server, s.shell);
+        let send = Request::SendText { pane: s.prod.to_string(), text: "hunter2-yours\n".into(), production: true };
+        let outcome = s.server.request(shell, send);
+        assert!(matches!(immediate(&mut s.server, outcome), Ok(Response::Ok)));
+        let log = std::fs::read_to_string(production_log()).unwrap();
+        assert!(!log.contains("hunter2"), "{log}");
+        let line = logged("\"kind\":\"send\"");
+        assert_eq!((line["plan"].as_str(), line["decision"].as_str()), (Some("14 bytes"), Some("yours")));
+        // Named by its number, not by a title, a name or a workspace's name what runs may set.
+        assert!(line.get("name").is_none() && line.get("workspace").is_none(), "{line}");
+        assert_eq!(line["servers"], json!([format!("pane {} (server prod)", s.prod)]));
+    }
+
+    #[test]
+    fn your_lines_leave_diagnostics_out() {
+        let why = "an unknown Kubernetes context (unreadable kubeconfig: invalid type: string \"tok-123\")";
+        assert_eq!(audit_why(why), "an unknown Kubernetes context");
+        assert_eq!(
+            audit_why("Kubernetes context arn:aws:eks:eu-west-1:1:cluster/prod"),
+            "Kubernetes context arn:aws:eks:eu-west-1:1:cluster/prod"
+        );
     }
 
     #[test]

@@ -112,7 +112,8 @@ idle`, `ssh.started/ended` (an `ssh` process appeared or ended in a pane, whethe
 connected), `production.entered/left` (`entered` again when the reason changes),
 `production.approved/refused` (an agent's production action, allowed or refused; see
 [Agents](production.md#agents)),
-`notification`, `tunnel.up/down`, `port.opened/closed`, `account.limit`,
+`notification`, `tunnel.up/down`, `port.opened/closed`, `account.limit`, `account.changed` (an
+agent's pane moved to another account, or back with Undo: `account`, `from`, `undo`),
 `runbook.started/finished`, `command.finished` (a command the shell marks ended: its `command`
 line, `exit` status and `seconds`; see [Shell commands](terminal.md#shell-commands)).
 

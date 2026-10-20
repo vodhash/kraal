@@ -288,6 +288,7 @@ impl Server {
                     ws: Some(ws),
                     near: Some(pane),
                     sudo: false,
+                    production: None,
                 };
                 self.edit_request(client, target, production)
             }

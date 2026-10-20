@@ -36,6 +36,9 @@ pub struct EditTarget {
     pub near: Option<PaneId>,
     /// As root, through sudo on the server.
     pub sudo: bool,
+    /// Why the server is production, when you were asked about editing it: a question to edit it
+    /// as root then is about production too.
+    pub production: Option<String>,
 }
 
 /// What to do when the server's file changed since it was read.
@@ -147,6 +150,7 @@ impl Server {
                 target.server,
                 if target.sudo { " as root" } else { "" }
             );
+            let target = EditTarget { production: Some(why.why), ..target };
             return Mode::confirm(message, ConfirmAction::Edit(Box::new(target)));
         }
         self.start_edit(Some(client), target, None);
@@ -843,6 +847,7 @@ mod tests {
                     ws: None,
                     near: None,
                     sudo,
+                    production: None,
                 };
                 super::super::jobs::FAIL_START.set(fail_start);
                 let job = crate::server::jobs::JobId(server.next_id);

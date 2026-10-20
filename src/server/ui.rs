@@ -216,6 +216,10 @@ pub enum ConfirmAction {
         /// Panes and the production reason the user is asked about.
         approve: Vec<(PaneId, crate::server::contexts::Production)>,
         pending: PendingInput,
+        /// The production panes the question named, and whether it was about a paste: what your
+        /// answer is logged for.
+        asked: Vec<(PaneId, crate::server::contexts::Production)>,
+        paste: bool,
     },
 }
 

@@ -39,6 +39,9 @@ struct ProductionAsk {
     message: String,
     workspace: u32,
     approve: Vec<(PaneId, Production)>,
+    /// The production panes the question names, and whether it is about a paste.
+    asked: Vec<(PaneId, Production)>,
+    paste: bool,
 }
 
 /// A bracketed paste that arrives in pieces (a long one, or one slow to come) is still one paste:
@@ -621,7 +624,13 @@ impl Server {
         let named = targets.iter().map(|t| (*t, self.pane_production(*t))).collect();
         let pending = PendingInput { items, targets: named };
         if let Some(ask) = self.production_guard(focused, targets, &pending) {
-            let action = ConfirmAction::Production { workspace: ask.workspace, approve: ask.approve, pending };
+            let action = ConfirmAction::Production {
+                workspace: ask.workspace,
+                approve: ask.approve,
+                pending,
+                asked: ask.asked,
+                paste: ask.paste,
+            };
             return Mode::confirm(ask.message, action);
         }
         self.send_items(targets, pending.items);
@@ -861,7 +870,8 @@ impl Server {
         } else {
             message
         };
-        Some(ProductionAsk { message, workspace: ws.id, approve })
+        let asked = if lines > 0 { prod } else { approve.clone() };
+        Some(ProductionAsk { message, workspace: ws.id, approve, asked, paste: lines > 0 })
     }
 
     fn answer_production(
@@ -871,7 +881,21 @@ impl Server {
         workspace: u32,
         approve: Vec<(PaneId, Production)>,
         pending: PendingInput,
+        (asked, paste): (Vec<(PaneId, Production)>, bool),
     ) -> Mode {
+        // Your answer on record, for each production pane the question named, even one gone
+        // since. What is typed or pasted is not: it may be a password.
+        let decision = if yes { "allowed" } else { "refused" };
+        let bytes: usize =
+            pending.items.iter().map(|i| if let InputItem::Paste(text) = i { text.len() } else { 0 }).sum();
+        let keys = pending.items.iter().filter(|i| matches!(i, InputItem::Key(_))).count();
+        let size =
+            [(keys > 0).then(|| format!("{keys} keys")), (bytes > 0).then(|| format!("a paste of {bytes} bytes"))];
+        let plan = size.into_iter().flatten().collect::<Vec<_>>().join(", ");
+        for (p, why) in asked {
+            let server = self.prod_label(p, &why.why);
+            self.record_yours(Some(p), if paste { "paste" } else { "broadcast" }, &plan, vec![server], decision);
+        }
         let Some(wi) = self.ws_index(workspace) else { return Mode::Normal };
         if !yes {
             // What the client typed after it waited behind it: it goes too.
@@ -1187,6 +1211,41 @@ mod tests {
         ));
         server.client_input(id, b"\x1b[201~");
         assert!(server.clients[&id].paste.is_none());
+    }
+
+    /// Your answer about a paste into production is on record, without what was pasted.
+    #[test]
+    fn a_production_paste_answer_is_logged_without_its_text() {
+        // Its log is read for its last line: no other test of this process may write there.
+        if !crate::testing::in_own_process("server::input::tests::a_production_paste_answer_is_logged_without_its_text")
+        {
+            return;
+        }
+        let (tx, _events) = queue::channel(4096);
+        let mut server = server(tx);
+        let (id, _peer) = client(&mut server);
+        let ws = server.clients[&id].workspace;
+        let spec = crate::pane::PaneSpec { command: vec!["cat".into()], ..Default::default() };
+        let prod = server.spawn_pane_in(ws, None, spec, crate::protocol::Placement::Tab, None).unwrap();
+        server.panes.get_mut(&prod).unwrap().ssh =
+            Some(crate::servers::Server { name: "db-prod".into(), host: "db-prod".into(), ..Default::default() });
+        for (yes, secret) in [(false, "hunter2-refused"), (true, "hunter2-allowed")] {
+            server.client_input(id, format!("\x1b[200~{secret}\n\x1b[201~").as_bytes());
+            server.flush_client_input(id);
+            let mode = std::mem::replace(&mut server.clients.get_mut(&id).unwrap().mode, super::Mode::Normal);
+            let super::Mode::Confirm(q) = mode else { panic!("a paste into production is asked about") };
+            let super::ConfirmAction::Production { workspace, approve, pending, asked, paste } = q.action else {
+                panic!()
+            };
+            server.answer_production(id, yes, workspace, approve, pending, (asked, paste));
+            let log = std::fs::read_to_string(crate::server::approvals::production_log()).unwrap();
+            assert!(!log.contains("hunter2"), "{log}");
+            let line: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+            assert_eq!(line["decision"], if yes { "allowed" } else { "refused" });
+            assert_eq!((line["kind"].as_str(), line["agent"].is_null()), (Some("paste"), true));
+            assert_eq!(line["plan"], format!("a paste of {} bytes", secret.len() + 1));
+            assert_eq!(line["pane"], serde_json::json!(prod));
+        }
     }
 
     #[test]
