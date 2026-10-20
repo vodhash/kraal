@@ -497,10 +497,12 @@ pub enum Request {
         pane: String,
         name: String,
     },
-    /// Replace a pane's program with `command`: tmux's `respawn-pane -k`, with which Claude's
-    /// agent teams start a teammate in the pane they split (see `kraal agent --teams`).
-    RespawnPane {
+    /// Start a Claude teammate's `command` in `pane`, which its `lead` split (tmux's
+    /// `respawn-pane -k`, as `kraal agent --teams` answers it): with the lead's account, and kept
+    /// open if it fails.
+    StartTeammate {
         pane: String,
+        lead: String,
         command: Vec<String>,
     },
     /// Type into a pane. A production pane is refused unless `production` says the caller
@@ -967,7 +969,7 @@ mod tests {
             Request::ClosePane { pane: s("1") },
             Request::FocusPane { pane: s("1") },
             Request::RenamePane { pane: s("1"), name: s("n") },
-            Request::RespawnPane { pane: s("1"), command: vec![s("sh"), s("-c"), s("claude")] },
+            Request::StartTeammate { pane: s("2"), lead: s("1"), command: vec![s("sh"), s("-c"), s("claude")] },
             Request::SendText { pane: s("1"), text: s("hi"), production: true },
             Request::SendKeys { pane: s("1"), keys: vec![s("ctrl+c")], production: false },
             Request::ReadPane { pane: s("1"), lines: Some(5) },

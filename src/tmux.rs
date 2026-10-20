@@ -1,7 +1,8 @@
 //! Claude Code's agent teams as kraal panes. `kraal agent claude --teams` starts Claude as if it
 //! ran inside tmux, with this binary first in its PATH under the name `tmux` ([`install_shim`]).
-//! Claude opens, titles and closes its teammates' panes with tmux commands: kraal answers them
-//! with its own panes. Any other tmux command goes to the real tmux.
+//! Claude opens, titles and closes its teammates' panes with tmux commands sent to the socket its
+//! `TMUX` names: kraal answers them with its own panes. Any other tmux command goes to the real
+//! tmux.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -9,7 +10,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use crate::protocol::{Placement, Request, Response};
 use crate::{client, paths};
@@ -50,6 +51,16 @@ pub fn carry_env(from: &[(String, String)], to: &mut Vec<(String, String)>) {
     }
 }
 
+/// Whether `env` is that of a lead [`lead_env`] made.
+pub fn is_lead(env: &[(String, String)]) -> bool {
+    env.iter().any(|(k, _)| k == VARS[1])
+}
+
+/// A teammate's variables: its lead's (its account's), without the pretence of tmux.
+pub fn teammate_env(lead: &[(String, String)]) -> Vec<(String, String)> {
+    lead.iter().filter(|(k, _)| !VARS.contains(&k.as_str()) && k != "PATH").cloned().collect()
+}
+
 fn shim_dir() -> PathBuf {
     paths::runtime_dir().join("bin")
 }
@@ -82,10 +93,7 @@ struct Lead {
 impl Lead {
     /// Only a Claude started by `kraal agent --teams`: its `TMUX` names its session's socket.
     fn from_env() -> Option<Lead> {
-        let socket = std::env::var("KRAAL_SOCKET").ok()?;
-        if std::env::var("TMUX").ok()?.split(',').next() != Some(socket.as_str()) {
-            return None;
-        }
+        let socket = synthetic()?;
         let process = std::env::var("KRAAL_PROCESS").ok()?;
         if process.is_empty() || !process.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return None;
@@ -102,12 +110,16 @@ impl Lead {
         client::request(Path::new(&self.socket), r)
     }
 
+    /// The panes it split, still open or not.
+    fn split(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.team).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+
     /// Its own pane, then the panes it split that are still open.
     fn team(&self) -> Result<Vec<String>> {
         let Response::Panes(open) = self.request(Request::ListPanes)? else { bail!("unexpected answer from kraal") };
-        let split = std::fs::read_to_string(&self.team).unwrap_or_default();
-        let open = |id: &&str| open.iter().any(|p| p.id.to_string() == *id);
-        Ok(std::iter::once(self.pane.clone()).chain(split.lines().filter(open).map(str::to_string)).collect())
+        let open = |id: &String| open.iter().any(|p| p.id.to_string() == *id);
+        Ok(std::iter::once(self.pane.clone()).chain(self.split().into_iter().filter(open)).collect())
     }
 
     fn joined(&self, pane: u32) -> std::io::Result<()> {
@@ -115,6 +127,12 @@ impl Lead {
         let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&self.team)?;
         writeln!(f, "{pane}")
     }
+}
+
+/// kraal's socket when this runs for a lead: the first field of its `TMUX`, which kraal set.
+fn synthetic() -> Option<String> {
+    let socket = std::env::var("KRAAL_SOCKET").ok()?;
+    (std::env::var("TMUX").ok()?.split(',').next() == Some(socket.as_str())).then_some(socket)
 }
 
 /// This binary run as `tmux`.
@@ -134,68 +152,84 @@ pub fn main(args: Vec<OsString>) -> i32 {
             }
         };
     }
-    real_tmux(args)
+    match real_tmux() {
+        Some(tmux) => {
+            let mut command = std::process::Command::new(tmux);
+            // Out of the team's pretend tmux; a real tmux's own session stays where it is.
+            if synthetic().is_some() {
+                command.env_remove("TMUX").env_remove("TMUX_PANE");
+            }
+            eprintln!("kraal: running tmux: {}", command.args(args).exec());
+            126
+        }
+        None => {
+            eprintln!("kraal: tmux is not installed (kraal answers only Claude's agent teams as tmux)");
+            127
+        }
+    }
 }
 
-/// The tmux installed after this one in PATH, outside the team's pretend tmux session.
-fn real_tmux(args: Vec<OsString>) -> i32 {
-    let me = std::env::current_exe().ok();
+/// The tmux installed after this one in PATH.
+fn real_tmux() -> Option<PathBuf> {
+    let me = std::env::current_exe().and_then(std::fs::canonicalize).ok();
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let found = std::env::split_paths(&path)
-        .map(|d| d.join("tmux"))
-        .find(|t| t.is_file() && std::fs::canonicalize(t).ok() != me);
-    let Some(tmux) = found else {
-        eprintln!("kraal: tmux is not installed (kraal answers only Claude's agent teams as tmux)");
-        return 127;
-    };
-    let err = std::process::Command::new(tmux).args(args).env_remove("TMUX").env_remove("TMUX_PANE").exec();
-    eprintln!("kraal: running tmux: {err}");
-    126
+    std::env::split_paths(&path).map(|d| d.join("tmux")).find(|t| t.is_file() && std::fs::canonicalize(t).ok() != me)
 }
 
-/// What `tmux WORDS` asks of kraal; `None` when it is for a real tmux server (another socket, a
-/// target kraal did not give, a command kraal does not answer).
+/// What `tmux WORDS` asks of kraal; `None` when it is for a real tmux: kraal answers what is
+/// sent to its socket (`-S`, as Claude sends everything), and `-V` when no tmux is installed.
 fn answer(lead: &Lead, words: &[String]) -> Option<Result<String>> {
     let (global, words) = options(words, "cfLST")?;
     if global.iter().any(|(o, _)| *o == 'V') {
-        return Some(Ok("tmux 3.4 (kraal)\n".into()));
+        return real_tmux().is_none().then(|| Ok("tmux 3.4 (kraal)\n".into()));
     }
-    if global.iter().any(|(o, v)| matches!(o, 'L' | 'f' | 'c') || *o == 'S' && v.as_deref() != Some(&lead.socket)) {
+    let ours = |(o, v): &(char, Option<String>)| *o == 'S' && v.as_deref() == Some(lead.socket.as_str());
+    if !global.iter().any(ours) {
         return None;
     }
-    let (command, rest) = words.split_first()?;
+    Some(on_socket(lead, words))
+}
+
+/// A tmux command sent to kraal's socket: one of those Claude sends for its teammates' panes,
+/// on its own pane or theirs. Anything else is refused, never pretended done.
+fn on_socket(lead: &Lead, words: &[String]) -> Result<String> {
+    let Some((command, rest)) = words.split_first() else { bail!("kraal answers only tmux commands of agent teams") };
+    let unsupported = || anyhow!("kraal does not answer tmux {command} (only Claude's agent teams)");
     let values = match command.as_str() {
         "display-message" | "display" => "cdt",
         "list-panes" | "lsp" => "Fft",
         "split-window" | "splitw" => "celptF",
         "respawn-pane" | "respawnp" => "cet",
-        "kill-pane" | "killp" => "t",
+        "kill-pane" | "killp" | "set-option" | "set" | "select-layout" | "selectl" => "t",
         "select-pane" | "selectp" => "Tt",
-        "set-option" | "set" | "set-window-option" | "setw" | "select-layout" | "selectl" => "t",
         "resize-pane" | "resizep" => "txy",
-        _ => return None,
+        _ => return Err(unsupported()),
     };
-    let (opts, args) = options(rest, values)?;
+    let (opts, args) = options(rest, values).ok_or_else(unsupported)?;
     let value = |o: char| opts.iter().rev().find(|(k, _)| *k == o).and_then(|(_, v)| v.clone());
     let has = |o: char| opts.iter().any(|(k, _)| *k == o);
+    let only = |allowed: &str| match opts.iter().find(|(o, _)| !allowed.contains(*o)) {
+        Some((o, _)) => Err(anyhow!("kraal does not answer tmux {command} -{o} (only Claude's agent teams)")),
+        None => Ok(()),
+    };
     let pane = match value('t') {
         None => lead.pane.clone(),
         Some(t) => target(&t, lead)?,
     };
-    let refuse = |allowed: &str| match opts.iter().find(|(o, _)| !allowed.contains(*o)) {
-        Some((o, _)) => Err(anyhow::anyhow!("kraal does not support {command} -{o}")),
-        None => Ok(()),
-    };
-    Some((|| match command.as_str() {
+    match command.as_str() {
         "display-message" | "display" => {
-            Ok(if has('p') { format!("{}\n", expand(&args.join(" "), &pane, lead)) } else { String::new() })
+            only("tp")?;
+            Ok(if has('p') { format!("{}\n", expand(&args.join(" "), &pane, lead)?) } else { String::new() })
         }
         "list-panes" | "lsp" => {
+            only("tF")?;
             let format = value('F').unwrap_or_else(|| "#{pane_id}".into());
-            Ok(lead.team()?.iter().map(|p| format!("{}\n", expand(&format, p, lead))).collect())
+            lead.team()?.iter().map(|p| Ok(format!("{}\n", expand(&format, p, lead)?))).collect()
         }
         "split-window" | "splitw" => {
-            refuse("dhvlptcPF")?;
+            only("dhvlptcPF")?;
+            let format = value('F').unwrap_or_else(|| "#{pane_id}".into());
+            expand(&format, &pane, lead)?;
             let opened = lead.request(Request::NewPane {
                 target: Some(pane),
                 command: shell_command(args),
@@ -207,40 +241,59 @@ fn answer(lead: &Lead, words: &[String]) -> Option<Result<String>> {
                 close_on_exit: true,
             })?;
             let Response::Pane(info) = opened else { bail!("unexpected answer from kraal") };
-            lead.joined(info.id)?;
-            let format = value('F').unwrap_or_else(|| "#{pane_id}".into());
-            Ok(if has('P') { format!("{}\n", expand(&format, &info.id.to_string(), lead)) } else { String::new() })
+            if let Err(e) = lead.joined(info.id) {
+                // A pane the lead cannot name would stay for good.
+                let _ = lead.request(Request::ClosePane { pane: info.id.to_string() });
+                bail!("recording the teammate's pane: {e}");
+            }
+            Ok(if has('P') { format!("{}\n", expand(&format, &info.id.to_string(), lead)?) } else { String::new() })
         }
         "respawn-pane" | "respawnp" => {
-            // shortcut: without -k as with it, the program running is replaced; tmux refuses then.
-            refuse("kt")?;
-            lead.request(Request::RespawnPane { pane, command: shell_command(args) })?;
+            only("kt")?;
+            if pane == lead.pane {
+                bail!("kraal starts teammates only in the panes their lead split");
+            }
+            lead.request(Request::StartTeammate { pane, lead: lead.pane.clone(), command: shell_command(args) })?;
             Ok(String::new())
         }
         "kill-pane" | "killp" => {
-            refuse("t")?;
+            only("t")?;
             lead.request(Request::ClosePane { pane })?;
             Ok(String::new())
         }
         "select-pane" | "selectp" => {
-            refuse("tT")?;
+            only("tT")?;
             match value('T') {
                 Some(name) => lead.request(Request::RenamePane { pane, name })?,
                 None => lead.request(Request::FocusPane { pane })?,
             };
             Ok(String::new())
         }
-        // Colors, borders, layout and sizes: kraal draws its panes its own way.
-        _ => Ok(String::new()),
-    })())
+        // Colors, borders and layout of the team's panes: kraal draws its panes its own way, and
+        // keeps a teammate's pane open when it fails (Claude asks `remain-on-exit failed`).
+        "set-option" | "set" => {
+            only("pwt")?;
+            if !(has('p') || has('w')) || value('t').is_none() {
+                bail!("kraal answers only the pane and window options of agent teams");
+            }
+            Ok(String::new())
+        }
+        _ => {
+            only(values)?;
+            Ok(String::new())
+        }
+    }
 }
 
-/// The pane a tmux target names when kraal gave it: `%ID` a pane, `@ID` the lead's team.
-fn target(t: &str, lead: &Lead) -> Option<String> {
-    if let Some(id) = t.strip_prefix('%').filter(|id| id.parse::<u32>().is_ok()) {
-        return Some(id.to_string());
-    }
-    t.strip_prefix('@').filter(|id| *id == lead.pane).map(str::to_string)
+/// The pane a tmux target names on kraal's socket: `%ID` the lead or a pane it split, `@ID` the
+/// lead's team.
+fn target(t: &str, lead: &Lead) -> Result<String> {
+    let id = match (t.strip_prefix('%'), t.strip_prefix('@')) {
+        (Some(id), _) if id == lead.pane || lead.split().iter().any(|s| s == id) => id,
+        (_, Some(id)) if id == lead.pane => id,
+        _ => bail!("{t} is not a pane of this agent team"),
+    };
+    Ok(id.to_string())
 }
 
 /// What tmux runs for a command given as words: the shell for none, one through `sh -c`.
@@ -282,34 +335,32 @@ fn options<'a>(words: &'a [String], values: &str) -> Option<(Opts, &'a [String])
     Some((opts, &words[i..]))
 }
 
-/// `format` with the tmux variables Claude reads; the others are empty.
-fn expand(format: &str, pane: &str, lead: &Lead) -> String {
+/// `format` with the tmux variables Claude reads; any other is refused.
+fn expand(format: &str, pane: &str, lead: &Lead) -> Result<String> {
     let mut out = String::new();
     let mut rest = format;
     while let Some(start) = rest.find("#{") {
         out.push_str(&rest[..start]);
-        let Some(len) = rest[start..].find('}') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
+        let Some(len) = rest[start..].find('}') else { bail!("unfinished tmux format {format:?}") };
         out.push_str(&match &rest[start + 2..start + len] {
             "pane_id" => format!("%{pane}"),
             "window_id" => format!("@{}", lead.pane),
             "session_name" => lead.session.clone(),
-            _ => String::new(),
+            other => bail!("kraal does not answer #{{{other}}} (only Claude's agent teams)"),
         });
         rest = &rest[start + len + 1..];
     }
     out.push_str(rest);
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempDir;
 
-    fn lead() -> Lead {
-        Lead { socket: "/run/k/main".into(), pane: "4".into(), session: "main".into(), team: PathBuf::new() }
+    fn lead(dir: &TempDir) -> Lead {
+        Lead { socket: "/run/k/main".into(), pane: "4".into(), session: "main".into(), team: dir.write("team", "9\n") }
     }
 
     fn words(s: &str) -> Vec<String> {
@@ -318,37 +369,55 @@ mod tests {
 
     #[test]
     fn claude_learns_its_pane_and_team_window() {
-        let l = lead();
-        let ask = |s: &str| answer(&l, &words(s)).map(|r| r.unwrap());
-        assert_eq!(ask("-V").as_deref(), Some("tmux 3.4 (kraal)\n"));
-        assert_eq!(ask("-S /run/k/main display-message -p #{pane_id}").as_deref(), Some("%4\n"));
+        let dir = TempDir::new("tmux-learns");
+        let l = lead(&dir);
+        let ask = |s: &str| answer(&l, &words(&format!("-S /run/k/main {s}"))).map(|r| r.unwrap());
+        assert_eq!(ask("display-message -p #{pane_id}").as_deref(), Some("%4\n"));
         assert_eq!(ask("display-message -t %4 -p #{window_id}").as_deref(), Some("@4\n"));
-        assert_eq!(ask("-S /run/k/main set-option -p -t %9 pane-border-style fg=red").as_deref(), Some(""));
+        assert_eq!(ask("set-option -p -t %9 pane-border-style fg=red").as_deref(), Some(""));
+        assert_eq!(ask("set-option -w -t @4 pane-border-status top").as_deref(), Some(""));
         assert_eq!(ask("select-layout -t @4 main-vertical").as_deref(), Some(""));
+        assert_eq!(ask("resize-pane -t %4 -x 30%").as_deref(), Some(""));
     }
 
     #[test]
     fn other_tmux_uses_go_to_the_real_one() {
-        let l = lead();
+        let dir = TempDir::new("tmux-real");
+        let l = lead(&dir);
         for call in [
             "new-session -d -s build make",
-            "send-keys -t build make Enter",
+            "kill-pane -t %9",
+            "display-message -p #{pane_id}",
             "-L claude-swarm-12 list-panes -t claude-swarm:swarm-view",
             "-S /tmp/other display-message -p #{pane_id}",
-            "kill-pane -t build:0.1",
-            "list-panes -t @7",
-            "split-window -t",
+            "set-option -g default-shell /bin/zsh",
         ] {
             assert!(answer(&l, &words(call)).is_none(), "{call}");
         }
     }
 
     #[test]
-    fn unsupported_options_are_refused_not_ignored() {
-        let l = lead();
-        let e = answer(&l, &words("split-window -b -t %4 -- cat")).unwrap().unwrap_err();
-        assert_eq!(e.to_string(), "kraal does not support split-window -b");
-        assert!(answer(&l, &words("kill-pane -a -t %4")).unwrap().is_err());
+    fn kraal_refuses_what_it_does_not_do() {
+        let dir = TempDir::new("tmux-refuses");
+        let l = lead(&dir);
+        let refused = |s: &str| answer(&l, &words(&format!("-S /run/k/main {s}"))).unwrap().unwrap_err().to_string();
+        assert_eq!(
+            refused("split-window -b -t %4 -- cat"),
+            "kraal does not answer tmux split-window -b (only Claude's agent teams)"
+        );
+        for call in [
+            "kill-pane -t %7",
+            "kill-pane -a -t %4",
+            "list-panes -t @7",
+            "show-environment -g",
+            "set-option -g default-shell /bin/zsh",
+            "display-message -p #{version}",
+            "respawn-pane -k -t %4 -- claude",
+            "split-window -t",
+        ] {
+            assert!(!refused(call).is_empty(), "{call}");
+        }
+        assert!(refused("kill-pane -t %7").contains("not a pane of this agent team"));
     }
 
     #[test]
@@ -367,10 +436,12 @@ mod tests {
     }
 
     #[test]
-    fn formats_keep_text_and_drop_unknown_variables() {
-        let l = lead();
-        assert_eq!(expand("#{session_name}:#{window_id}.#{pane_id} #{pane_tty}x", "7", &l), "main:@4.%7 x");
-        assert_eq!(expand("a #{pane_id", "7", &l), "a #{pane_id");
+    fn formats_keep_text_and_refuse_unknown_variables() {
+        let dir = TempDir::new("tmux-formats");
+        let l = lead(&dir);
+        assert_eq!(expand("#{session_name}:#{window_id}.#{pane_id} x", "7", &l).unwrap(), "main:@4.%7 x");
+        assert!(expand("#{pane_tty}", "7", &l).is_err());
+        assert!(expand("a #{pane_id", "7", &l).is_err());
     }
 
     #[test]
@@ -378,12 +449,15 @@ mod tests {
         assert_eq!(lead_args(words("-c")), words("--teammate-mode auto -c"));
         assert_eq!(lead_args(words("--teammate-mode=in-process")), words("--teammate-mode=in-process"));
         let env = lead_env(Path::new("/run/k/main"));
-        assert!(env.contains(&("TMUX".into(), "/run/k/main,0,0".into())));
+        assert!(is_lead(&env) && env.contains(&("TMUX".into(), "/run/k/main,0,0".into())));
         let path = &env.iter().find(|(k, _)| k == "PATH").unwrap().1;
         assert!(path.starts_with(&shim_dir().display().to_string()));
         let mut to = vec![("TMUX".to_string(), "kept".to_string())];
         carry_env(&env, &mut to);
         assert_eq!(to.len(), 3);
         assert_eq!(to[0].1, "kept");
+        let mut account = env.clone();
+        account.push(("CLAUDE_CONFIG_DIR".into(), "/a".into()));
+        assert_eq!(teammate_env(&account), [("CLAUDE_CONFIG_DIR".to_string(), "/a".to_string())]);
     }
 }

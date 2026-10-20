@@ -360,11 +360,7 @@ pub(super) fn agent(
     }
     // Here, in this pane: its workspace's account rules still apply.
     let workspace = if inside { s.own_workspace() } else { None };
-    let env = match std::env::var_os("KRAAL_SOCKET").filter(|_| teams) {
-        Some(socket) => crate::tmux::lead_env(std::path::Path::new(&socket)),
-        None => Vec::new(),
-    };
-    exec_agent(&agent, account.as_deref(), workspace.as_deref(), &args, &env)
+    exec_agent(&agent, account.as_deref(), workspace.as_deref(), &args, &[])
 }
 
 /// Start an agent on the chosen account in this terminal, with `env` besides the account's.

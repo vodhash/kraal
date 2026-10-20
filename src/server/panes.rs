@@ -281,23 +281,39 @@ impl Server {
         result
     }
 
-    /// Replace the program of pane `id` with `command`, as tmux's `respawn-pane -k` does.
-    pub(super) fn respawn_command(&mut self, id: PaneId, command: Vec<String>) -> Result<(), String> {
-        // Never a production pane: what runs there is chosen by who sends to it, knowingly.
-        self.allow_input(id, false)?;
+    /// Run Claude teammate `command` in pane `id`, which `lead` split (with `cat` waiting there):
+    /// with the variables kraal gave the lead's account, and the pane kept when it fails.
+    pub(super) fn start_teammate(&mut self, id: PaneId, lead: PaneId, command: Vec<String>) -> Result<(), String> {
+        let lead_label = self.pane_label(lead);
+        let lead = &self.panes.get(&lead).ok_or("no such pane")?.spec;
+        if !crate::tmux::is_lead(&lead.env) {
+            return Err(format!("{lead_label} is not a Claude started with kraal agent --teams"));
+        }
+        let (env, env_remove) = (crate::tmux::teammate_env(&lead.env), lead.env_remove.clone());
         let label = self.pane_label(id);
+        let edited = self.pane_edits.contains_key(&id);
         let pane = self.panes.get_mut(&id).ok_or("no such pane")?;
-        if pane.term().is_none() {
-            return Err(format!("{label} runs no program to replace"));
+        // Only a pane running a local command: never a shell, a server, an agent kraal started or a
+        // file kraal edits, which this would end.
+        if pane.term().is_none()
+            || pane.ssh.is_some()
+            || pane.spec.command.is_empty()
+            || pane.spec.account.is_some()
+            || edited
+        {
+            return Err(format!("{label} is not a pane split for a teammate"));
         }
         pane.kill();
+        let cwd = pane.spec.cwd.clone();
         pane.spec = PaneSpec {
             command,
-            cwd: pane.spec.cwd.clone(),
-            close_on_exit: pane.spec.close_on_exit,
+            env,
+            env_remove,
+            cwd,
+            close_on_exit: true,
+            keep_on_failure: true,
             ..Default::default()
         };
-        pane.ssh = None;
         let result = pane.respawn(&self.env, &self.tx).map_err(|e| format!("{e:#}"));
         self.persist_dirty = true;
         self.mark_dirty();

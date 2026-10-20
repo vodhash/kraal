@@ -197,15 +197,17 @@ the agent's conversation history.
 [agent teams](https://code.claude.com/docs/en/agent-teams) on. Each teammate Claude starts opens
 as a kraal pane next to it, named after the teammate, and kraal follows it like any other agent:
 its state in the sidebar and on its pane, `alt+a`, notifications, `kraal agents`. Teammates run
-on the lead's account. When the lead exits, Claude closes its teammates' panes.
+on the lead's account. A teammate that fails keeps its pane open, with its error. When the lead
+exits, Claude closes its teammates' panes.
 
 For this, Claude runs as if inside tmux: kraal sets `TMUX` and puts itself first in Claude's
 `PATH` under the name `tmux`, and passes `--teammate-mode auto` unless you give your own
 `--teammate-mode`. Claude's calls to split, name, start and close its teammates' panes go to
-kraal. Any other tmux command, from Claude or the tools it runs, goes to the real tmux when one
+kraal, which refuses any other call made to its pretend tmux and acts only on the panes of the
+team. Any other tmux command, from Claude or the tools it runs, goes to the real tmux when one
 is installed.
 
-- `--teams` works from a kraal pane (with `--here`, in that pane), for Claude Code only.
+- `--teams` works from a kraal pane, for Claude Code only, and opens the lead in a new pane.
 - Claude Code does not resume teammates: after a restart, a teammate's pane waits for Enter.
 
 ## Worktrees

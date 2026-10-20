@@ -385,7 +385,7 @@ pub enum Cmd {
         here: bool,
         /// Claude Code: its agent teams open their teammates as kraal panes next to it (Claude
         /// runs as if inside tmux, and kraal answers as tmux).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "here")]
         teams: bool,
         /// Arguments for the agent.
         #[arg(last = true)]

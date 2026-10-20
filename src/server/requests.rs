@@ -352,9 +352,11 @@ impl Server {
                 }
                 Response::Ok
             }),
-            Request::RespawnPane { pane, command } => {
-                self.resolve(&pane).and_then(|p| self.respawn_command(p, command)).map(|()| Response::Ok)
-            }
+            Request::StartTeammate { pane, lead, command } => self
+                .resolve(&pane)
+                .and_then(|p| Ok((p, self.resolve(&lead)?)))
+                .and_then(|(p, lead)| self.start_teammate(p, lead, command))
+                .map(|()| Response::Ok),
             Request::RenamePane { pane, name } => self.resolve(&pane).map(|p| {
                 self.rename_pane(p, (!name.is_empty()).then_some(name));
                 self.mark_persist();
