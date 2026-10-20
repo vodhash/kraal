@@ -617,7 +617,7 @@ fn the_releases_promised_are_the_ones_tested() {
     let read = |name: &str| std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(name)).unwrap();
     let script = read("tests/compat.sh");
     let releases = script.lines().find_map(|line| line.strip_prefix("RELEASES=")).unwrap().trim_matches('"');
-    assert_eq!(releases, "v0.2.0 v0.3.0 v0.4.0 v0.4.1");
+    assert_eq!(releases, "v0.2.0 v0.3.0 v0.4.0 v0.4.1 v0.5.3");
     let docs = read("docs/compatibility.md");
     for release in releases.split_whitespace() {
         assert!(docs.contains(&format!("**{}**", release.trim_start_matches('v'))));

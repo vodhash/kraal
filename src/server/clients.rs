@@ -97,6 +97,7 @@ impl Server {
                 remote: false,
                 laptop: None,
                 peer,
+                origin: None,
             },
         );
     }
@@ -192,7 +193,9 @@ impl Server {
                 self.probe_cell_size(id);
                 self.relayout();
             }
+            ClientMsg::Displayed { id: mark } => self.production_displayed(id, mark),
             ClientMsg::Repaint => {
+                self.production_repaint(id);
                 if let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached) {
                     c.encoder.invalidate();
                     c.dirty = Dirty::Yes;
@@ -212,9 +215,16 @@ impl Server {
             | ClientMsg::AttachmentCancel { .. }
             | ClientMsg::AttachmentStatus { .. }
             | ClientMsg::AttachmentDismiss { .. }
-            | ClientMsg::AttachmentLocal { .. }) => self.attachment_message(id, msg),
+            | ClientMsg::AttachmentLocal { .. }) => {
+                self.attachment_message(id, msg);
+                // A transfer that ended gives the client's input back: a question may wait for it.
+                self.show_production_ask();
+            }
             ClientMsg::Detach => self.detach(id, "detached"),
-            ClientMsg::Request { version, request, .. } => {
+            ClientMsg::Request { version, request, origin } => {
+                if let Some(c) = self.clients.get_mut(&id) {
+                    c.origin = origin;
+                }
                 let result = if version != protocol::PROTOCOL_VERSION
                     && !(version == protocol::upgrade_protocol()
                         && matches!(
@@ -313,6 +323,7 @@ impl Server {
         self.mark_seen_focused(id);
         self.git_soon_for(id);
         self.show_warnings();
+        self.show_production_ask();
         self.mark_dirty();
         // The first frame goes at once: nothing else is coming to batch it with.
         self.next_render = Some(Instant::now());
@@ -333,6 +344,7 @@ impl Server {
         // What the client was in the middle of goes with it.
         self.drafts.remove(&id);
         self.md_sessions.remove(&id);
+        self.production_client_gone(id);
         let mut files_changed = false;
         for p in self.panes.values_mut() {
             if let crate::pane::Content::Files(f) = &mut p.content {

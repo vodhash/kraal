@@ -345,7 +345,7 @@ impl RawClient {
         let (cols, rows) = size;
         let workspace = serde_json::json!(workspace);
         let hello = format!(
-            r#"{{"type":"attach","version":5,"cols":{cols},"rows":{rows},"workspace":{workspace},"remote":false{installed}}}"#
+            r#"{{"type":"attach","version":6,"cols":{cols},"rows":{rows},"workspace":{workspace},"remote":false{installed}}}"#
         );
         raw_frame(&mut stream, 0, hello.as_bytes());
         let screen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -648,7 +648,7 @@ pub(super) fn raw_request(env: &Env, request: serde_json::Value) -> serde_json::
     let socket = env.root.join("run/kraal").join(format!("{}.sock", env.session));
     let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
     stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    let message = serde_json::json!({ "type": "request", "version": 5, "request": request }).to_string();
+    let message = serde_json::json!({ "type": "request", "version": 6, "request": request }).to_string();
     raw_frame(&mut stream, 0, message.as_bytes());
     let mut header = [0u8; 5];
     stream.read_exact(&mut header).unwrap();

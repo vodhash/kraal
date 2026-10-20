@@ -70,9 +70,13 @@ impl Draft {
         Draft { id: 0, runbook, steps, pane, targets, values: Vec::new(), trusted, choices: None, reviewed: None }
     }
 
+    pub(in crate::server) fn runbook_name(&self) -> &str {
+        &self.runbook.name
+    }
+
     /// The parameters whose choices a command lists, each with that command and its value, in
     /// a draft that has all its values.
-    fn listed(&self) -> Vec<(Param, String, String)> {
+    pub(in crate::server) fn listed(&self) -> Vec<(Param, String, String)> {
         let params = self.steps.params.iter().zip(&self.values).filter(|(p, _)| p.choices.is_empty());
         params.filter_map(|(p, (_, value))| Some((p.clone(), p.choices_command.clone()?, value.clone()))).collect()
     }

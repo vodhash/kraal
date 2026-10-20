@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::AgentState;
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const KRAAL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Kraal 0.2.0 and 0.3.0 used protocol 2 and omitted it from Pong.
@@ -197,6 +197,10 @@ pub enum ClientMsg {
     },
     /// Restore terminal content without taking layout control.
     Repaint,
+    /// The frames before [`ServerMsg::DisplayMark`] `id` are on the terminal.
+    Displayed {
+        id: u32,
+    },
     Detach,
     /// Reserve the destination while the client classifies a buffered paste.
     PasteStart,
@@ -256,6 +260,9 @@ pub enum ClientMsg {
     Request {
         version: u32,
         request: Request,
+        /// The pane the asking command runs in, as its environment says.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<Origin>,
     },
     /// A message from a newer client, or one this kraal cannot read (only ever read).
     #[serde(untagged)]
@@ -263,10 +270,21 @@ pub enum ClientMsg {
 }
 
 impl ClientMsg {
-    /// `request`, as this kraal sends it.
+    /// `request`, as this kraal sends it: from the pane it runs in, if any.
     pub fn request(request: Request) -> ClientMsg {
-        ClientMsg::Request { version: PROTOCOL_VERSION, request }
+        let origin = match (std::env::var("KRAAL_SESSION"), std::env::var("KRAAL_PANE")) {
+            (Ok(session), Ok(pane)) => Some(Origin { session, pane }),
+            _ => None,
+        };
+        ClientMsg::Request { version: PROTOCOL_VERSION, request, origin }
     }
+}
+
+/// A kraal pane, named by its session and its id (`KRAAL_SESSION`, `KRAAL_PANE`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Origin {
+    pub session: String,
+    pub pane: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,6 +325,11 @@ pub enum ServerMsg {
         /// The focused pane, only when the client mode allows a clipboard shortcut.
         pane: Option<crate::layout::PaneId>,
         agent: bool,
+    },
+    /// The frames before it show a question, and `id` is new for each time they do: answer
+    /// [`ClientMsg::Displayed`] once they are on the terminal.
+    DisplayMark {
+        id: u32,
     },
     AttachmentPrepared {
         token: String,
@@ -641,6 +664,14 @@ pub enum Request {
         #[serde(default)]
         all: bool,
     },
+    /// A command about to act on production servers from the caller's side (`kraal exec`, `cp`,
+    /// `rm`, `ssh`), or on another session's: answered at once, unless it runs in an agent's
+    /// pane, where the user is asked first. Refused with an error that says nothing was done.
+    ApproveProduction {
+        kind: String,
+        plan: String,
+        servers: Vec<String>,
+    },
     /// Read the configuration file again; answered with its warnings, one per line.
     ReloadConfig,
     /// Save the session and stop. With `restart`, attached clients wait for the next server
@@ -974,6 +1005,11 @@ mod tests {
             Request::BufferSet { name: Some(s("n")), text: s("t") },
             Request::BufferPaste { buffer: None, pane: s("1"), production: false },
             Request::BufferDelete { buffer: Some(s("n")), all: false },
+            Request::ApproveProduction {
+                kind: s("exec"),
+                plan: s("kraal exec web -- uptime"),
+                servers: vec![s("web")],
+            },
             Request::ReloadConfig,
             Request::KillServer { restart: true },
         ];
@@ -1010,6 +1046,7 @@ mod tests {
             },
             ClientMsg::Resize { cols: 80, rows: 24 },
             ClientMsg::Repaint,
+            ClientMsg::Displayed { id: 4 },
             ClientMsg::Detach,
             ClientMsg::PasteStart,
             ClientMsg::ClipboardPaste { pane: 7, key: vec![0x16], text: b"text".to_vec(), token: None },
@@ -1105,6 +1142,7 @@ mod tests {
             ServerMsg::Open { url: s("https://example.com") },
             ServerMsg::ClipboardFocus { pane: Some(7), agent: true },
             ServerMsg::ClipboardFocus { pane: None, agent: false },
+            ServerMsg::DisplayMark { id: 4 },
             ServerMsg::Clipboard { id: 1, origin: ClipboardOrigin::User, text: s("hello") },
             ServerMsg::AttachmentPrepared {
                 token: s("ab"),

@@ -99,7 +99,7 @@ fn notify(env: &Env, title: &str, body: &str) {
     let socket = env.root.join("run/kraal").join(format!("{}.sock", env.session));
     let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
     let request = serde_json::json!({ "cmd": "notify", "title": title, "body": body });
-    let message = serde_json::json!({ "type": "request", "version": 5, "request": request });
+    let message = serde_json::json!({ "type": "request", "version": 6, "request": request });
     raw_frame(&mut stream, 0, message.to_string().as_bytes());
     // Answered: the event is out.
     stream.read_exact(&mut [0u8; 5]).unwrap();

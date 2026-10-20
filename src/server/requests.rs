@@ -58,8 +58,12 @@ impl RequestOutcome {
 
 impl Server {
     pub(super) fn request(&mut self, client: ClientId, req: Request) -> RequestOutcome {
+        let (reply, req) = match self.production_gate(ReplyHandle::new(client), req) {
+            Ok(passed) => passed,
+            Err(held) => return held,
+        };
         let before: Vec<_> = self.workspaces.iter().map(|w| w.id).collect();
-        let outcome = self.answer(ReplyHandle::new(client), req);
+        let outcome = self.answer(reply, req);
         if matches!(&outcome, RequestOutcome::Immediate { result: Err(_), .. }) {
             self.workspaces.retain(|w| before.contains(&w.id) || !w.tabs.is_empty() || w.kept.is_some());
         }
@@ -76,7 +80,7 @@ impl Server {
         result
     }
 
-    fn answer(&mut self, reply: ReplyHandle, req: Request) -> RequestOutcome {
+    pub(super) fn answer(&mut self, reply: ReplyHandle, req: Request) -> RequestOutcome {
         match req {
             req @ (Request::RunbookPlan { .. } | Request::RunbookRun { .. }) => self.answer_runbook_request(reply, req),
             req @ (Request::NewPane { .. } | Request::OpenAgent { .. } | Request::EditRemote { .. }) => {
@@ -102,7 +106,8 @@ impl Server {
                     Err(e) => return RequestOutcome::Immediate { reply: reply.take().unwrap(), result: Err(e) },
                 };
                 // Answered once the choices a parameter's command lists are known.
-                match self.prepare_runbook(&path, target.as_deref(), params, pane, &mut reply) {
+                let agent = reply.as_ref().is_some_and(|r| self.caller_maybe_agent(r.client()));
+                match self.prepare_runbook(&path, target.as_deref(), params, pane, agent, &mut reply) {
                     Ok(()) => return RequestOutcome::Deferred,
                     Err(e) => Err(format!("{e:#}")),
                 }
@@ -355,29 +360,11 @@ impl Server {
             }),
             Request::SendText { pane, text, production } => self.resolve(&pane).and_then(|p| {
                 self.allow_input(p, production)?;
-                let pn = self.panes.get_mut(&p).ok_or("no such pane")?;
-                if pn.exit_code.is_some() {
-                    return Err("the pane's program has exited".into());
-                }
-                pn.write_input(text.into_bytes());
-                Ok(Response::Ok)
+                self.send_text(p, text)
             }),
             Request::SendKeys { pane, keys, production } => self.resolve(&pane).and_then(|p| {
                 self.allow_input(p, production)?;
-                let mut specs = Vec::new();
-                for k in &keys {
-                    specs.push(KeySpec::parse(k).map_err(|e| format!("{k:?}: {e}"))?);
-                }
-                let pn = self.panes.get_mut(&p).ok_or("no such pane")?;
-                let modes = pn.input_modes();
-                let mut bytes = Vec::new();
-                for s in specs {
-                    // As if typed: in the kitty protocol when the program uses it.
-                    let key = crate::input::Key { code: s.code, mods: s.mods, raw: Vec::new() };
-                    bytes.extend(crate::input::encode_key(&key, modes));
-                }
-                pn.write_input(bytes);
-                Ok(Response::Ok)
+                self.send_keys(p, &keys)
             }),
             Request::ReadPane { pane, lines } => {
                 self.resolve(&pane).map(|p| Response::Text(self.panes[&p].text(lines)))
@@ -508,8 +495,10 @@ impl Server {
             .map_err(|e: anyhow::Error| format!("{e:#}")),
             Request::OpenSsh { target, group, placement, near, command } => {
                 if group {
-                    let group = target.strip_prefix('@').unwrap_or(&target);
-                    return self.open_group(group, &command).map(|_| Response::Ok).map_err(|e| format!("{e:#}"));
+                    return self
+                        .open_group(super::ssh::ssh_group(&target), &command)
+                        .map(|_| Response::Ok)
+                        .map_err(|e| format!("{e:#}"));
                 }
                 let near = near.as_deref().map(|n| self.resolve(n)).transpose()?;
                 let Some(server) = self.resolve_server(&target) else {
@@ -551,6 +540,8 @@ impl Server {
                 self.paste_buffer_to(p, buffer.as_deref())
             }),
             Request::BufferDelete { buffer, all } => self.delete_buffer(buffer.as_deref(), all),
+            // Past the gate: not an agent's, or allowed.
+            Request::ApproveProduction { .. } => Ok(Response::Ok),
             Request::RunbookPlan { .. }
             | Request::RunbookRun { .. }
             | Request::Subscribe { .. }
@@ -561,6 +552,34 @@ impl Server {
             | Request::ReloadConfig
             | Request::KillServer { .. } => unreachable!("request family dispatched"),
         }
+    }
+
+    /// `kraal send`: `text` typed into pane `p`.
+    pub(super) fn send_text(&mut self, p: PaneId, text: String) -> Result<Response, String> {
+        let pn = self.panes.get_mut(&p).ok_or("no such pane")?;
+        if pn.exit_code.is_some() {
+            return Err("the pane's program has exited".into());
+        }
+        pn.write_input(text.into_bytes());
+        Ok(Response::Ok)
+    }
+
+    /// `kraal keys`: `keys` pressed in pane `p`.
+    pub(super) fn send_keys(&mut self, p: PaneId, keys: &[String]) -> Result<Response, String> {
+        let mut specs = Vec::new();
+        for k in keys {
+            specs.push(KeySpec::parse(k).map_err(|e| format!("{k:?}: {e}"))?);
+        }
+        let pn = self.panes.get_mut(&p).ok_or("no such pane")?;
+        let modes = pn.input_modes();
+        let mut bytes = Vec::new();
+        for s in specs {
+            // As if typed: in the kitty protocol when the program uses it.
+            let key = crate::input::Key { code: s.code, mods: s.mods, raw: Vec::new() };
+            bytes.extend(crate::input::encode_key(&key, modes));
+        }
+        pn.write_input(bytes);
+        Ok(Response::Ok)
     }
 
     /// Open a pane as `kraal run` asks.
@@ -642,7 +661,7 @@ impl Server {
     }
 
     /// Input from the CLI reaches a production pane only when the caller says it means to.
-    fn allow_input(&self, pane: PaneId, production: bool) -> Result<(), String> {
+    pub(super) fn allow_input(&self, pane: PaneId, production: bool) -> Result<(), String> {
         if self.workspace_of(pane).is_some_and(|(wi, _)| self.workspaces[wi].kept.is_some()) {
             return Err("The workspace has not finished closing. Retry Close to continue.".into());
         }

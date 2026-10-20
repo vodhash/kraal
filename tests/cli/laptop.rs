@@ -158,7 +158,7 @@ fn copy_job_output_describes_both_directions_and_finishes_below_progress() {
 
 fn advertise(client: &mut RawClient, id: &str) {
     let message = serde_json::json!({
-        "type": "attach", "version": 5, "cols": 120, "rows": 40,
+        "type": "attach", "version": 6, "cols": 120, "rows": 40,
         "workspace": "w", "remote": true,
         "laptop": { "id": id, "host": "travel", "os": "linux" }
     });

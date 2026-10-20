@@ -5,6 +5,7 @@
 
 mod account_ui;
 mod agents;
+mod approvals;
 mod attachments;
 mod attention;
 mod bottom_bar;
@@ -419,6 +420,8 @@ pub struct Client {
     pub(in crate::server) paste: Option<input::PasteFlow>,
     /// The process that connected, where the system tells.
     pub peer: Option<u32>,
+    /// The pane the request came from, as the asking command's environment says.
+    pub origin: Option<crate::protocol::Origin>,
 }
 
 /// A line of the messages log.
@@ -457,6 +460,10 @@ pub struct Server {
     /// from where its own panes start (see [`Server::client_area`]).
     pub layout_area: Rect,
     waits: Vec<PendingWait>,
+    /// Agents' actions on production waiting for the user, the one asked first first.
+    production_asks: Vec<approvals::ProductionAsk>,
+    /// The last [`protocol::ServerMsg::DisplayMark`] sent: each display of a question gets its own.
+    production_marks: u32,
     persist_dirty: bool,
     last_persist: Instant,
     last_tick: Instant,
@@ -962,6 +969,8 @@ impl Server {
             // A 120×40 terminal's, until a client attaches.
             layout_area: Rect::new(0, 1, 120, 39 - u16::from(bottom_bar)),
             waits: Vec::new(),
+            production_asks: Vec::new(),
+            production_marks: 0,
             persist_dirty: false,
             last_persist: Instant::now(),
             last_tick: Instant::now(),
@@ -1705,7 +1714,10 @@ impl Server {
             }
             Event::Watched(changes) => self.watched(&changes),
             Event::ClientGone(id) => self.drop_client(id),
-            Event::Attachment(id, token, result) => self.attachment_complete(id, token, result),
+            Event::Attachment(id, token, result) => {
+                self.attachment_complete(id, token, result);
+                self.show_production_ask();
+            }
             Event::Git(dir, info) => self.git_result(dir, info),
             Event::Warning(w) => self.warnings.push(w),
             Event::Emit(ty, fields) => self.emit(ty, fields),
@@ -2003,9 +2015,12 @@ impl Server {
             if let Some(at) = still {
                 wake = Some(wake.map_or(at, |w| w.min(at)));
             }
-            match c.out.try_send(frame_bytes(&bytes)) {
-                Ok(()) if tell => c.told_shown = Some(shown),
-                Ok(()) => {}
+            let sent = match c.out.try_send(frame_bytes(&bytes)) {
+                Ok(()) if tell => {
+                    c.told_shown = Some(shown);
+                    true
+                }
+                Ok(()) => true,
                 Err(TrySendError::Full(_)) => {
                     c.encoder.invalidate();
                     c.dirty = Dirty::Yes;
@@ -2013,8 +2028,12 @@ impl Server {
                     if let Some(ci) = self.images.get_mut(&id) {
                         ci.forget();
                     }
+                    false
                 }
-                Err(TrySendError::Disconnected(_)) => {}
+                Err(TrySendError::Disconnected(_)) => false,
+            };
+            if sent {
+                self.frame_sent(id);
             }
             self.last_frame = Instant::now();
         }

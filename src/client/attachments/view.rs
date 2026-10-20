@@ -415,6 +415,12 @@ impl Controller {
         self.output_with(bytes, cols, rows, |bytes| self.output_local(bytes))
     }
 
+    /// A local question, this one's or the laptop's, covers the server's frames until it
+    /// closes and asks for a repaint.
+    pub fn covers(&self) -> bool {
+        self.state.lock().unwrap().view(&self.host()).is_some() || self.laptop.as_ref().is_some_and(|l| l.covers())
+    }
+
     pub(super) fn output_with(
         &self,
         bytes: &[u8],

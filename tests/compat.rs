@@ -27,7 +27,7 @@ struct Kraal {
 
 impl Kraal {
     fn this() -> Kraal {
-        Kraal { bin: env!("CARGO_BIN_EXE_kraal").into(), version: env!("CARGO_PKG_VERSION").into(), protocol: 5 }
+        Kraal { bin: env!("CARGO_BIN_EXE_kraal").into(), version: env!("CARGO_PKG_VERSION").into(), protocol: 6 }
     }
 
     fn state_dir(&self) -> &str {
@@ -43,7 +43,9 @@ impl Kraal {
         let protocol = match version.as_str() {
             "0.2.0" | "0.3.0" => 2,
             "0.4.0" => 3,
-            _ => 4,
+            "0.4.1" => 4,
+            v if v.starts_with("0.5.") => 5,
+            v => panic!("which protocol kraal {v} speaks is not known here"),
         };
         Kraal { bin, version, protocol }
     }
@@ -244,6 +246,41 @@ fn different_protocols_refuse_attachment_in_both_directions() {
             assert!(String::from_utf8_lossy(&listed.stderr).contains("protocol mismatch"));
         }
     }
+}
+
+/// Once this kraal replaces the binary of an older one whose session still runs, a production
+/// command it must ask that session about is refused, as other commands are, and does nothing.
+#[test]
+#[ignore = "needs KRAAL_OLD, another release's kraal: tests/compat.sh runs it"]
+fn production_commands_are_refused_by_a_session_of_another_protocol() {
+    let (old, this) = (Kraal::old(), Kraal::this());
+    if old.protocol == this.protocol {
+        return;
+    }
+    let env = Env::new("compat-production");
+    env.run(&old, &["open", "w"]);
+    let (bin, reached) = (env.root.join("bin"), env.root.join("reached"));
+    std::fs::create_dir_all(&bin).unwrap();
+    write_script(&bin.join("ssh"), &format!("#!/bin/sh\ntouch '{}'\n", reached.display()));
+    std::fs::write(
+        env.root.join("config/kraal/servers.toml"),
+        "[[server]]\nname = \"web-prod-1\"\nhost = \"web-prod-1\"\n",
+    )
+    .unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    // As from a pane of that session: only then is it asked (outside kraal it just goes on).
+    let pane = env.panes(&old)[0]["id"].to_string();
+    let out = env
+        .cmd(&this, &["exec", "web-prod-1", "--", "true"])
+        .env("PATH", path)
+        .env("KRAAL_SOCKET", env.socket())
+        .env("KRAAL_SESSION", &env.session)
+        .env("KRAAL_PANE", pane.trim_matches('"'))
+        .output()
+        .unwrap();
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && error.contains("protocol mismatch"), "{error}");
+    assert!(!reached.exists(), "the command reached the server");
 }
 
 #[test]

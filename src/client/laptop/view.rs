@@ -78,6 +78,11 @@ impl Controller {
         let _ = self.output(&[]);
     }
 
+    /// A local question covers the server's frames.
+    pub fn covers(&self) -> bool {
+        self.state.lock().unwrap().prompt.is_some()
+    }
+
     pub fn output(&self, bytes: &[u8]) -> std::io::Result<bool> {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         self.output_with(bytes, cols, rows, |bytes| super::super::terminal().write(bytes))

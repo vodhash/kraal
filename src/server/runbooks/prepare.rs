@@ -206,7 +206,7 @@ impl Server {
         }
     }
 
-    pub(super) fn target_label(&self, t: &Target) -> String {
+    pub(in crate::server) fn target_label(&self, t: &Target) -> String {
         match t {
             Target::Local => "this machine".into(),
             Target::Pane(p) => match self.pane_server(*p) {
@@ -217,7 +217,7 @@ impl Server {
         }
     }
 
-    pub(super) fn target_production(
+    pub(in crate::server) fn target_production(
         &self,
         t: &Target,
         pane: Option<PaneId>,
@@ -302,7 +302,7 @@ impl Server {
 
     /// What identifies each target of a draft: its name, where it runs (server, directory) and
     /// its production reason.
-    pub(super) fn identities(&self, d: &Draft) -> Vec<String> {
+    pub(in crate::server) fn identities(&self, d: &Draft) -> Vec<String> {
         d.targets
             .as_deref()
             .unwrap_or(&[])
@@ -310,8 +310,13 @@ impl Server {
             .map(|t| {
                 let place = match t {
                     Target::Local => self.draft_cwd(d).map(|c| c.display().to_string()).unwrap_or_default(),
-                    Target::Pane(p) => self.tool_context(*p).place(),
-                    Target::Server(s) => s.address(),
+                    // How a server is reached (its jump host's address too) is part of where.
+                    Target::Pane(p) => {
+                        let ctx = self.tool_context(*p);
+                        let reached = ctx.server.as_ref().map(|s| self.connection(s)).unwrap_or_default();
+                        format!("{} {reached}", ctx.place())
+                    }
+                    Target::Server(s) => self.connection(s),
                 };
                 format!("{} @ {place} · {:?}", self.target_label(t), self.target_production(t, d.pane))
             })
@@ -335,13 +340,17 @@ impl Server {
     /// picker offers for its parameter ([`Server::param_question`]): the choices its file gives,
     /// and those a command lists, unless the runbook is a repository's nobody approved yet.
     /// No command of that one runs: the plan says which values wait, and its run holds them to
-    /// their lists if it is approved by then ([`Server::run_prepared`]).
+    /// their lists if it is approved by then ([`Server::run_prepared`]). Asked for by what may be
+    /// an `agent` (from an agent's pane, or a pane of another session), a runbook that reaches
+    /// production and lists choices with commands is refused: those commands would run before
+    /// the user is asked about the run.
     pub(in crate::server) fn prepare_runbook(
         &mut self,
         path: &Path,
         target: Option<&str>,
         params: Vec<(String, String)>,
         pane: Option<PaneId>,
+        agent: bool,
         reply: &mut Option<ReplyHandle>,
     ) -> Result<()> {
         let r = runbooks::load(path, runbooks::source_of(path))?;
@@ -377,6 +386,15 @@ impl Server {
         }
         for (p, (_, value)) in d.steps.params.iter().zip(&d.values) {
             p.accept(value, &p.choices)?;
+        }
+        if agent
+            && !d.listed().is_empty()
+            && d.targets.iter().flatten().any(|t| self.target_production(t, pane).is_some())
+        {
+            bail!(
+                "{} lists choices with commands and acts on production: from an agent's pane or another session, those commands would run before you are asked; run it yourself",
+                d.runbook.name
+            );
         }
         if !d.trusted {
             let why = "its choices are listed once the runbook is approved";

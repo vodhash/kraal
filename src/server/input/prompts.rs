@@ -192,6 +192,12 @@ impl Server {
     }
 
     fn on_confirm_inner(&mut self, id: ClientId, mut q: Question, ev: InputEvent) -> Mode {
+        // Typed before a frame showed it: not an answer to it.
+        if let ConfirmAction::ApproveProduction(ask) = q.action
+            && self.ask_not_drawn(id, ask)
+        {
+            return Mode::Confirm(q);
+        }
         let layout = crate::server::overlays::confirm_layout(&q, self.client_screen(id));
         let yes = match ev {
             InputEvent::Key(k) => {
@@ -350,6 +356,10 @@ impl Server {
             ConfirmAction::Production { workspace, approve, pending } => {
                 return self.answer_production(id, yes, workspace, approve, pending);
             }
+            ConfirmAction::ApproveProduction(ask) => {
+                self.answer_production_ask(ask, yes);
+                return Mode::Normal;
+            }
             ConfirmAction::RunRunbook => {
                 self.confirm_runbook(id, yes);
                 return Mode::Normal;
@@ -382,6 +392,7 @@ impl Server {
                     | ConfirmAction::UseExisting { .. }
                     | ConfirmAction::StopAndSwitch { .. }
                     | ConfirmAction::Production { .. }
+                    | ConfirmAction::ApproveProduction(_)
                     | ConfirmAction::RunRunbook
                     | ConfirmAction::RunBlock { .. }
                     | ConfirmAction::TrustRunbook

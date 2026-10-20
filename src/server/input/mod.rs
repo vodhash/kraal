@@ -241,6 +241,10 @@ impl Server {
                 c.dirty = Dirty::Yes;
             }
         }
+        // An agent's action on production waits for a client free to ask.
+        if !self.production_asks.is_empty() && self.clients.get(&id).is_some_and(|c| matches!(c.mode, Mode::Normal)) {
+            self.show_production_ask();
+        }
         if shown {
             self.mark_dirty_client(id);
             if typed {
