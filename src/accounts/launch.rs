@@ -453,19 +453,30 @@ pub fn resume_argv(kind: &AgentKind, argv: &[String], session: &str) -> Option<(
             // Whatever chose the conversation before goes: this one is resumed. `--resume`'s
             // value is optional (alone, it opens a picker).
             let mut args = args.peekable();
+            // An option whose value may be left out, before a selector that goes: the word after
+            // that selector (a prompt) would become its value, so it goes last instead.
+            let mut parked = Vec::new();
             while let Some(a) = args.next() {
-                match a.as_str() {
+                let selector = match a.as_str() {
                     "--session-id" => {
                         args.next();
+                        true
                     }
                     "--resume" | "-r" => {
                         args.next_if(|v| !v.starts_with('-'));
+                        true
                     }
-                    "--continue" | "-c" => {}
-                    _ if a.starts_with("--resume=") || a.starts_with("--session-id=") => {}
-                    _ => rest.push(a.clone()),
+                    "--continue" | "-c" => true,
+                    _ => a.starts_with("--resume=") || a.starts_with("--session-id="),
+                };
+                if !selector {
+                    rest.push(a.clone());
+                } else if rest.last().is_some_and(|l| CLAUDE_OPTIONAL.contains(&l.as_str())) {
+                    parked.extend(rest.pop());
                 }
             }
+            let at = rest.iter().position(|a| a == "--").unwrap_or(rest.len());
+            rest.splice(at..at, parked);
         }
         // `codex resume|fork …` is told by [`resumable_args`].
         "codex" => rest.extend(args.cloned()),

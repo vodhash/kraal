@@ -740,6 +740,13 @@ fn agents_started_directly_resume_with_their_arguments() {
         "the word after it names the session"
     );
     assert_eq!(resumable_args(claude, &argv("--rc Phone")).unwrap(), (argv("--rc Phone"), true));
+    for run in ["claude --rc -c Fix", "claude --rc --resume old Fix", "claude --rc --session-id=s Fix"] {
+        assert_eq!(resume_argv(claude, &argv(run), "abc").unwrap(), (argv("claude --resume abc --rc"), false), "{run}");
+    }
+    assert_eq!(
+        resume_argv(claude, &argv("claude --rc -c -- Fix"), "abc").unwrap(),
+        (argv("claude --resume abc --rc"), false)
+    );
     assert_eq!(resumable_args(claude, &argv("--rc=Phone fix")).unwrap(), (argv("--rc=Phone"), false), "a prompt");
     assert!(resume_argv(claude, &argv("claude"), "x; rm -rf /").is_none());
     assert!(resume_argv(claude, &argv("vim"), "abc").is_none());
