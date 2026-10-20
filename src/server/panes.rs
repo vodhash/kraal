@@ -285,12 +285,15 @@ impl Server {
     /// with the variables kraal gave the lead's account, and the pane kept when it fails.
     pub(super) fn start_teammate(&mut self, id: PaneId, lead: PaneId, command: Vec<String>) -> Result<(), String> {
         let lead_label = self.pane_label(lead);
+        let label = self.pane_label(id);
+        if self.workspace_of(id).map(|(wi, _)| wi) != self.workspace_of(lead).map(|(wi, _)| wi) {
+            return Err(format!("{label} is not in the workspace of {lead_label}"));
+        }
         let lead = &self.panes.get(&lead).ok_or("no such pane")?.spec;
         if !crate::tmux::is_lead(&lead.env) {
             return Err(format!("{lead_label} is not a Claude started with kraal agent --teams"));
         }
         let (env, env_remove) = (crate::tmux::teammate_env(&lead.env), lead.env_remove.clone());
-        let label = self.pane_label(id);
         let edited = self.pane_edits.contains_key(&id);
         let pane = self.panes.get_mut(&id).ok_or("no such pane")?;
         // Only a pane running a local command: never a shell, a server, an agent kraal started or a
