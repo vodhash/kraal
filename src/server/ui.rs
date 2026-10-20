@@ -196,8 +196,8 @@ pub enum ConfirmAction {
         /// Where the tool was asked for (see `Server::tool_place`): it runs there or not at all.
         place: Option<String>,
     },
-    /// Edit a file of a server in the local editor: one of production (why it is), or as root.
-    Edit(Box<super::edits::EditTarget>, Option<String>),
+    /// Edit a file of a production server in the local editor.
+    Edit(Box<super::edits::EditTarget>),
     /// Trust the version of a repository runbook being prepared, then go on preparing it.
     TrustRunbook,
     /// Run the runbook being prepared (its plan is the message).
@@ -216,6 +216,10 @@ pub enum ConfirmAction {
         /// Panes and the production reason the user is asked about.
         approve: Vec<(PaneId, crate::server::contexts::Production)>,
         pending: PendingInput,
+        /// The production panes the question named, and whether it was about a paste: what your
+        /// answer is logged for.
+        asked: Vec<(PaneId, crate::server::contexts::Production)>,
+        paste: bool,
     },
 }
 
@@ -265,7 +269,7 @@ impl ConfirmAction {
             ConfirmAction::RemoveWorktrees(_) => "Remove worktrees".into(),
             ConfirmAction::TrustWorktreeSetup(_) => "Trust this version".into(),
             ConfirmAction::RunTool { .. } => "Run tool".into(),
-            ConfirmAction::Edit(..) => "Edit".into(),
+            ConfirmAction::Edit(_) => "Edit".into(),
             ConfirmAction::TrustRunbook => "Trust this version".into(),
             ConfirmAction::RunRunbook => "Run".into(),
             ConfirmAction::RunBlock { .. } => "Send to the pane".into(),

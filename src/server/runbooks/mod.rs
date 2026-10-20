@@ -62,7 +62,8 @@ pub struct Draft {
     choices: Option<Vec<String>>,
     /// Where the plan shown said it runs (each target's identity): it runs there or not at all.
     reviewed: Option<Vec<String>>,
-    /// The plan shown and its production targets then, for the production log.
+    /// The runbook's name and its production targets when its plan was shown, for your line in
+    /// the production log.
     pub asked: Option<(String, Vec<String>)>,
 }
 

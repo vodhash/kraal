@@ -116,14 +116,8 @@ impl Server {
                     Place::Pane(pane) => Some(pane),
                     Place::Elsewhere | Place::Outside => None,
                 };
-                // What is typed or pasted is not written: it may be a password.
-                let plan = match &need.act {
-                    Act::Input { input: Input::Text(text), .. } => format!("{} bytes", text.len()),
-                    Act::Input { input: Input::Keys(keys), .. } => format!("{} keys", keys.len()),
-                    Act::Input { input: Input::Paste(text), .. } => format!("a paste of {} bytes", text.len()),
-                    _ => need.plan.clone(),
-                };
-                self.record_yours(pane, &need.kind, &plan, need.servers, "yours");
+                let (plan, servers) = self.yours(&req, &need);
+                self.record_yours(pane, &need.kind, &plan, servers, "yours");
             }
             return Ok((reply, req));
         }
@@ -232,7 +226,7 @@ impl Server {
             }
             Request::RunbookRun { token } => {
                 let (_, d) = self.plans.get(token).ok_or("no such plan: review the runbook again")?;
-                let servers = self.runbook_production(d);
+                let servers = self.runbook_production(d, false);
                 Ok((!servers.is_empty()).then(|| Need {
                     kind: "runbook".into(),
                     plan: self.plan(d, true),
@@ -246,13 +240,53 @@ impl Server {
         }
     }
 
-    /// The production targets of a runbook's plan, each with why it is production.
-    pub(in crate::server) fn runbook_production(&self, d: &super::runbooks::Draft) -> Vec<String> {
+    /// The production targets of a runbook's plan, each with why it is production; named as your
+    /// own lines name panes when they are `yours`.
+    pub(in crate::server) fn runbook_production(&self, d: &super::runbooks::Draft, yours: bool) -> Vec<String> {
+        let label = |t: &super::runbooks::Target| match t {
+            super::runbooks::Target::Pane(p) if yours && self.pane_server(*p).is_none() => self.audit_label(*p),
+            _ => self.target_label(t),
+        };
         d.targets
             .iter()
             .flatten()
-            .filter_map(|t| self.target_production(t, d.pane).map(|p| format!("{} ({})", self.target_label(t), p.why)))
+            .filter_map(|t| self.target_production(t, d.pane).map(|p| format!("{} ({})", label(t), p.why)))
             .collect()
+    }
+
+    /// Your `need` as its line says it: what and where, never what is typed or run there (nor a
+    /// command's arguments, which the shell expanded): it may hold a secret.
+    fn yours(&self, req: &Request, need: &Need) -> (String, Vec<String>) {
+        if let Act::Input { pane, production, input } = &need.act {
+            let size = match input {
+                Input::Text(text) => format!("{} bytes", text.len()),
+                Input::Keys(keys) => format!("{} keys", keys.len()),
+                Input::Paste(text) => format!("a paste of {} bytes", text.len()),
+            };
+            return (size, vec![self.prod_label(*pane, &production.why)]);
+        }
+        match req {
+            Request::RunbookRun { token } if let Some((_, d)) = self.plans.get(token) => {
+                (d.runbook_name().to_string(), self.runbook_production(d, true))
+            }
+            Request::EditRemote { .. } => (need.plan.clone(), need.servers.clone()),
+            _ => (format!("kraal {}", need.kind), need.servers.clone()),
+        }
+    }
+
+    /// A pane as your own lines name it: by the name you gave it, else by its number; never by
+    /// a title its program set, which may show what was typed.
+    pub(in crate::server) fn audit_label(&self, pane: PaneId) -> String {
+        let name = self.panes.get(&pane).and_then(|p| p.name.clone()).unwrap_or_else(|| format!("pane {pane}"));
+        match self.workspace_of(pane) {
+            Some((wi, _)) => format!("{} › {name}", self.workspaces[wi].name),
+            None => name,
+        }
+    }
+
+    /// A production pane in your own lines, with why it is production.
+    pub(in crate::server) fn prod_label(&self, pane: PaneId, why: &str) -> String {
+        format!("{} ({why})", self.audit_label(pane))
     }
 
     /// Whether the caller may be an agent that is not asked here: one runs in its pane, or it
@@ -525,7 +559,16 @@ impl Server {
         servers: Vec<String>,
         decision: &str,
     ) {
-        let mut fields = pane.map(|p| self.pane_fields(p)).unwrap_or_default();
+        let mut fields = serde_json::Map::new();
+        if let Some(p) = pane {
+            fields.insert("pane".into(), json!(p));
+            if let Some(name) = self.panes.get(&p).and_then(|p| p.name.clone()) {
+                fields.insert("name".into(), json!(name));
+            }
+            if let Some((wi, _)) = self.workspace_of(p) {
+                fields.insert("workspace".into(), json!(self.workspaces[wi].name));
+            }
+        }
         fields.insert("agent".into(), Value::Null);
         fields.insert("kind".into(), json!(kind));
         fields.insert("plan".into(), json!(plan));
@@ -736,10 +779,11 @@ mod tests {
         assert!(matches!(immediate(&mut s.server, outcome), Ok(Response::Ok)));
         assert_eq!(asking(&s.server, s.ui), None);
         // Yours, on record all the same.
-        let line = logged("outside-agent");
+        let line = logged("\"kind\":\"exec\"");
         assert_eq!((line["decision"].as_str(), line["agent"].is_null()), (Some("yours"), true));
-        assert_eq!((line["kind"].as_str(), &line["pane"]), (Some("exec"), &json!(s.shell)));
+        assert_eq!((line["plan"].as_str(), &line["pane"]), (Some("kraal exec"), &json!(s.shell)));
         assert_eq!(line["servers"], json!(["web-prod-1"]));
+        assert!(!std::fs::read_to_string(production_log()).unwrap().contains("outside-agent"), "no arguments");
         // What you send is not written: it may be a password.
         let (shell, _peer, _receive) = caller(&mut s.server, s.shell);
         let send = Request::SendText { pane: s.prod.to_string(), text: "hunter2-yours\n".into(), production: true };
@@ -749,6 +793,10 @@ mod tests {
         assert!(!log.contains("hunter2"), "{log}");
         let line = logged("\"kind\":\"send\"");
         assert_eq!((line["plan"].as_str(), line["decision"].as_str()), (Some("14 bytes"), Some("yours")));
+        // Named by its number, not by a title its program may set from what it reads.
+        assert!(line.get("name").is_none(), "{line}");
+        let label = format!("{} › pane {} (server prod)", s.server.workspaces[0].name, s.prod);
+        assert_eq!(line["servers"], json!([label]));
     }
 
     #[test]

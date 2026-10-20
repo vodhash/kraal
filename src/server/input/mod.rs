@@ -39,6 +39,9 @@ struct ProductionAsk {
     message: String,
     workspace: u32,
     approve: Vec<(PaneId, Production)>,
+    /// The production panes the question names, and whether it is about a paste.
+    asked: Vec<(PaneId, Production)>,
+    paste: bool,
 }
 
 /// A bracketed paste that arrives in pieces (a long one, or one slow to come) is still one paste:
@@ -621,7 +624,13 @@ impl Server {
         let named = targets.iter().map(|t| (*t, self.pane_production(*t))).collect();
         let pending = PendingInput { items, targets: named };
         if let Some(ask) = self.production_guard(focused, targets, &pending) {
-            let action = ConfirmAction::Production { workspace: ask.workspace, approve: ask.approve, pending };
+            let action = ConfirmAction::Production {
+                workspace: ask.workspace,
+                approve: ask.approve,
+                pending,
+                asked: ask.asked,
+                paste: ask.paste,
+            };
             return Mode::confirm(ask.message, action);
         }
         self.send_items(targets, pending.items);
@@ -861,7 +870,8 @@ impl Server {
         } else {
             message
         };
-        Some(ProductionAsk { message, workspace: ws.id, approve })
+        let asked = if lines > 0 { prod } else { approve.clone() };
+        Some(ProductionAsk { message, workspace: ws.id, approve, asked, paste: lines > 0 })
     }
 
     fn answer_production(
@@ -871,24 +881,18 @@ impl Server {
         workspace: u32,
         approve: Vec<(PaneId, Production)>,
         pending: PendingInput,
+        (asked, paste): (Vec<(PaneId, Production)>, bool),
     ) -> Mode {
         let Some(wi) = self.ws_index(workspace) else { return Mode::Normal };
-        // Your answer on record, for each production pane it is about. What is pasted is not:
-        // it may be a password.
+        // Your answer on record, for each production pane the question named. What is typed or
+        // pasted is not: it may be a password.
         let decision = if yes { "allowed" } else { "refused" };
         let bytes: usize =
             pending.items.iter().map(|i| if let InputItem::Paste(text) = i { text.len() } else { 0 }).sum();
-        // A paste is asked about for every production pane it goes to; typing, for those that
-        // were not approved yet.
-        let (kind, about): (&str, Vec<(PaneId, &Production)>) = if bytes > 0 || approve.is_empty() {
-            ("paste", pending.targets.iter().filter_map(|(p, why)| why.as_ref().map(|why| (*p, why))).collect())
-        } else {
-            ("broadcast", approve.iter().map(|(p, why)| (*p, why)).collect())
-        };
-        let plan = if bytes > 0 { format!("a paste of {bytes} bytes") } else { "typing".into() };
-        let records: Vec<(PaneId, String)> =
-            about.into_iter().map(|(p, why)| (p, format!("{} ({})", self.pane_label(p), why.why))).collect();
-        for (p, server) in records {
+        let (kind, plan) =
+            if paste { ("paste", format!("a paste of {bytes} bytes")) } else { ("broadcast", "typing".into()) };
+        for (p, why) in asked {
+            let server = self.prod_label(p, &why.why);
             self.record_yours(Some(p), kind, &plan, vec![server], decision);
         }
         if !yes {
@@ -1228,8 +1232,10 @@ mod tests {
             server.flush_client_input(id);
             let mode = std::mem::replace(&mut server.clients.get_mut(&id).unwrap().mode, super::Mode::Normal);
             let super::Mode::Confirm(q) = mode else { panic!("a paste into production is asked about") };
-            let super::ConfirmAction::Production { workspace, approve, pending } = q.action else { panic!() };
-            server.answer_production(id, yes, workspace, approve, pending);
+            let super::ConfirmAction::Production { workspace, approve, pending, asked, paste } = q.action else {
+                panic!()
+            };
+            server.answer_production(id, yes, workspace, approve, pending, (asked, paste));
             let log = std::fs::read_to_string(crate::server::approvals::production_log()).unwrap();
             assert!(!log.contains("hunter2"), "{log}");
             let line: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();

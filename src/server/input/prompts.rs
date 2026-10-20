@@ -354,10 +354,10 @@ impl Server {
                 self.confirm_switch(pane, token, id, yes);
                 return Mode::Normal;
             }
-            ConfirmAction::Production { workspace, approve, pending } => {
-                return self.answer_production(id, yes, workspace, approve, pending);
+            ConfirmAction::Production { workspace, approve, pending, asked, paste } => {
+                return self.answer_production(id, yes, workspace, approve, pending, (asked, paste));
             }
-            ConfirmAction::Edit(ref target, Some(ref why)) => {
+            ConfirmAction::Edit(ref target) if let Some(why) = &target.production => {
                 let sudo = if target.sudo { " --sudo" } else { "" };
                 let plan = format!("kraal edit{sudo} {}:{}", target.server, target.path);
                 self.record_yours(target.near, "edit", &plan, vec![format!("{} ({why})", target.server)], decision);
@@ -377,7 +377,7 @@ impl Server {
             }
             ConfirmAction::RunBlock { index, production } => {
                 if let Some((pane, plan)) = production.as_ref().and_then(|_| self.block_record(id, index)) {
-                    let server = format!("{} ({})", self.pane_label(pane), production.as_ref().unwrap().why);
+                    let server = self.prod_label(pane, &production.as_ref().unwrap().why);
                     self.record_yours(Some(pane), "runbook block", &plan, vec![server], decision);
                 }
                 return self.confirm_block(id, index, production, yes);
@@ -388,8 +388,7 @@ impl Server {
                 return Mode::Normal;
             }
             ConfirmAction::RunTool { pane, name, selection, reason, place } => {
-                let server =
-                    pane.map(|p| format!("{} ({})", self.pane_label(p), reason.why)).unwrap_or(reason.why.clone());
+                let server = pane.map(|p| self.prod_label(p, &reason.why)).unwrap_or(reason.why.clone());
                 self.record_yours(pane, "tool", &name, vec![server], decision);
                 if !yes {
                     return Mode::Normal;
@@ -420,7 +419,7 @@ impl Server {
                     | ConfirmAction::RunTool { .. } => {
                         unreachable!("answered above")
                     }
-                    ConfirmAction::Edit(target, _) => self.start_edit(Some(id), *target, None),
+                    ConfirmAction::Edit(target) => self.start_edit(Some(id), *target, None),
                     ConfirmAction::ClosePane(p) => self.close_pane(p),
                     ConfirmAction::CloseTab { workspace, tab } => {
                         if let Some(wi) = self.ws_index(workspace)

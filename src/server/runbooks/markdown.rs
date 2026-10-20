@@ -118,15 +118,15 @@ impl Server {
         Mode::confirm(lines.join("\n"), ConfirmAction::RunBlock { index, production })
     }
 
-    /// Where step `index` of the client's runbook in progress runs, and what it types there.
+    /// Where step `index` of the client's runbook in progress runs, and which step it is.
     pub(in crate::server) fn block_record(
         &self,
         client: ClientId,
         index: usize,
     ) -> Option<(crate::server::PaneId, String)> {
         let s = self.md_sessions.get(&client)?;
-        let code = &s.blocks.get(index)?.code;
-        Some((s.target, format!("{}, step {}: {}", s.title, index + 1, s.runbook.source.shown(code))))
+        s.blocks.get(index)?;
+        Some((s.target, format!("{}, step {}", s.title, index + 1)))
     }
 
     /// Read the session's runbook again (off the event loop) before going on with block `index`
