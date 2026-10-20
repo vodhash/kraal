@@ -56,6 +56,14 @@ pub fn is_lead(env: &[(String, String)]) -> bool {
     env.iter().any(|(k, _)| k == VARS[1])
 }
 
+/// A restored lead's variables, for the socket and shim of the server it runs in now.
+pub fn refresh_lead(env: &mut Vec<(String, String)>, socket: &Path) {
+    if is_lead(env) {
+        env.retain(|(k, _)| !VARS.contains(&k.as_str()) && k != "PATH");
+        env.extend(lead_env(socket));
+    }
+}
+
 /// A teammate's variables: its lead's (its account's), without the pretence of tmux.
 pub fn teammate_env(lead: &[(String, String)]) -> Vec<(String, String)> {
     lead.iter().filter(|(k, _)| !VARS.contains(&k.as_str()) && k != "PATH").cloned().collect()
@@ -138,10 +146,11 @@ fn synthetic() -> Option<String> {
 /// This binary run as `tmux`.
 pub fn main(args: Vec<OsString>) -> i32 {
     let words: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    let answer = match route(&words, synthetic().as_deref()) {
+    let answer = match route(&words, std::env::var("KRAAL_SOCKET").ok().as_deref()) {
         Route::Real => return delegate(args),
         Route::Version if real_tmux().is_some() => return delegate(args),
         Route::Version => Ok("tmux 3.4 (kraal)\n".to_string()),
+        Route::Unsupported(o) => Err(anyhow!("kraal does not answer tmux -{o} (only Claude's agent teams)")),
         // Sent to kraal: answered by kraal, or refused, never passed to a real tmux.
         Route::Kraal(start) => match Lead::from_env() {
             _ if args.iter().any(|a| a.to_str().is_none()) => Err(anyhow!("kraal reads only UTF-8 tmux arguments")),
@@ -191,6 +200,8 @@ enum Route {
     Version,
     /// To kraal's socket, with the command from this word on.
     Kraal(usize),
+    /// To kraal's socket, with an option of tmux's own that kraal does not take.
+    Unsupported(char),
 }
 
 /// kraal answers what is sent to its socket (the last `-S`, as tmux reads them), where Claude
@@ -201,8 +212,9 @@ fn route(words: &[String], socket: Option<&str>) -> Route {
         return Route::Version;
     }
     let last = global.iter().rev().find(|(o, _)| *o == 'S').and_then(|(_, v)| v.as_deref());
-    match socket {
-        Some(socket) if last == Some(socket) => Route::Kraal(words.len() - rest.len()),
+    match (socket, global.iter().find(|(o, _)| *o != 'S')) {
+        (Some(socket), Some((o, _))) if last == Some(socket) => Route::Unsupported(*o),
+        (Some(socket), None) if last == Some(socket) => Route::Kraal(words.len() - rest.len()),
         _ => Route::Real,
     }
 }
@@ -233,6 +245,16 @@ fn on_socket(lead: &Lead, words: &[String]) -> Result<String> {
         None => lead.pane.clone(),
         Some(t) => target(&t, lead)?,
     };
+    // A word tmux would refuse there (`kill-pane %9`, missing its -t), refused too.
+    let most = match command.as_str() {
+        "kill-pane" | "killp" | "list-panes" | "lsp" | "select-pane" | "selectp" => 0,
+        "select-layout" | "selectl" | "resize-pane" | "resizep" => 1,
+        "set-option" | "set" => 2,
+        _ => usize::MAX,
+    };
+    if args.len() > most {
+        bail!("kraal does not answer tmux {command} {}", args.join(" "));
+    }
     match command.as_str() {
         "display-message" | "display" => {
             only("tp")?;
@@ -428,6 +450,7 @@ mod tests {
         assert_eq!(route(&words("-S /run/k/main display-message -p #{pane_id}"), None), Route::Real);
         assert_eq!(route(&words("-S /tmp/tools.sock -S /run/k/main lsp"), ours), Route::Kraal(4));
         assert_eq!(route(&words("-V"), ours), Route::Version);
+        assert_eq!(route(&words("-S /run/k/main -h kill-pane -t %4"), ours), Route::Unsupported('h'));
     }
 
     #[test]
@@ -451,6 +474,8 @@ mod tests {
             "respawn-pane -k -t %4 -- claude",
             "respawn-pane -t %9 -- claude",
             "respawn-pane -k -t %9",
+            "kill-pane %9",
+            "select-pane -t %9 researcher",
             "split-window -t",
         ] {
             assert!(!refused(call).is_empty(), "{call}");
@@ -494,6 +519,12 @@ mod tests {
         carry_env(&env, &mut to);
         assert_eq!(to.len(), 3);
         assert_eq!(to[0].1, "kept");
+        let mut moved = vec![("TMUX".to_string(), "/old,0,0".to_string()), ("PATH".into(), "/old/bin".into())];
+        refresh_lead(&mut moved, Path::new("/run/k/main"));
+        assert!(
+            moved.contains(&("TMUX".into(), "/run/k/main,0,0".into()))
+                && !moved.iter().any(|(_, v)| v.contains("/old"))
+        );
         let mut account = env.clone();
         account.push(("CLAUDE_CONFIG_DIR".into(), "/a".into()));
         assert_eq!(teammate_env(&account), [("CLAUDE_CONFIG_DIR".to_string(), "/a".to_string())]);

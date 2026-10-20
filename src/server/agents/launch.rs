@@ -32,7 +32,10 @@ impl Server {
     /// restore): not for a one-shot run (`claude -p`), which stays as it was, nor when a prompt
     /// was left out or would be sent; those wait for Enter.
     pub fn resume_spec(&self, spec: &PaneSpec, session: Option<&str>) -> (PaneSpec, bool) {
-        resume_spec(&self.accounts, spec, session)
+        let (mut spec, exact) = resume_spec(&self.accounts, spec, session);
+        // Restored by a server whose socket (or runtime directory) may be another one.
+        crate::tmux::refresh_lead(&mut spec.env, &self.env.socket);
+        (spec, exact)
     }
 
     /// The spec to start pane `p` with again, if it is an agent that had a conversation: the

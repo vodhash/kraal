@@ -1284,6 +1284,25 @@ fn undo_is_saved_only_with_a_started_change_and_survives_resuming_the_pane() {
     );
 }
 
+/// `kraal agent --teams` restored by a server elsewhere (another runtime directory): its lead
+/// keeps its team mode, with this server's socket and shim.
+#[test]
+fn a_restored_team_lead_finds_this_server() {
+    let t = SwitchTest::new("teams-restored");
+    let mut spec = t.server.panes[&1].spec.clone();
+    spec.env.extend([
+        ("TMUX".into(), "/old/run/kraal/main.sock,0,0".into()),
+        ("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into()),
+        ("PATH".into(), "/old/run/kraal/bin:/usr/bin".into()),
+    ]);
+    let (resumed, _) = t.server.resume_spec(&spec, Some("session"));
+    let tmux = format!("{},0,0", t.server.env.socket.display());
+    assert!(resumed.env.contains(&("TMUX".into(), tmux)), "{:?}", resumed.env);
+    assert!(resumed.env.contains(&("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into())));
+    assert!(!resumed.env.iter().any(|(_, v)| v.contains("/old")), "{:?}", resumed.env);
+    assert_eq!(resumed.env.iter().filter(|(k, _)| k == "TMUX").count(), 1);
+}
+
 #[test]
 fn claude_undo_carries_the_latest_transcript_and_refuses_divergence() {
     for diverged in [false, true] {
