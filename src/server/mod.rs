@@ -779,6 +779,9 @@ pub fn run(session: &str) -> Result<()> {
     if let Err(e) = crate::attachments::cleanup(session) {
         warnings.push(format!("attachment cleanup: {e:#}"));
     }
+    if let Err(e) = crate::tmux::install_shim() {
+        warnings.push(format!("agent teams (kraal agent --teams) cannot start: {e}"));
+    }
     // In the log too: the list is shown to who attaches, and none may.
     if let Some(refused) = paths::runtime_dir_refused() {
         eprintln!("kraal: warning: {refused}");

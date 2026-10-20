@@ -453,3 +453,83 @@ fn agents_follow_prints_the_list_each_time_it_changes() {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+
+/// `kraal agent claude --teams`: the tmux commands Claude Code runs for a teammate open, title,
+/// start and close a kraal pane; its other tmux commands reach the real tmux.
+#[test]
+fn agent_teams_open_teammates_as_kraal_panes() {
+    let env = Env::new("teams");
+    let bin = env.root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    write_script(&bin.join("tmux"), "#!/bin/sh\necho \"real-tmux $* TMUX=$TMUX\"\n");
+    // Claude Code's own calls, inside tmux.
+    write_script(
+        &bin.join("claude"),
+        r#"#!/bin/sh
+[ "$2" = status ] && exit 1
+t() { tmux -S "${TMUX%%,*}" "$@"; }
+me=$(t display-message -p '#{pane_id}')
+win=$(t display-message -t "$me" -p '#{window_id}')
+mate=$(t split-window -d -t "$me" -h -l 70% -P -F '#{pane_id}' -- cat)
+t select-pane -t "$mate" -T researcher
+t set-option -p -t "$mate" pane-border-style fg=red
+t set-option -p -t "$mate" remain-on-exit failed
+t respawn-pane -k -t "$mate" -- 'echo "mate tmux=$TMUX key=$ANTHROPIC_API_KEY"; exec sleep 100'
+failing=$(t split-window -d -t "$mate" -v -P -F '#{pane_id}' -- cat)
+t respawn-pane -k -t "$failing" -- 'echo boom; exit 1'
+echo "lead $me $win $(t list-panes -t "$win" -F '#{pane_id}' | tr '\n' ' ')"
+echo "teams=$CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS args=$*"
+tmux new-session -d -s build
+t kill-pane -t %1 2>&1 | tr -d '\n'; echo " (outside)"
+read -r go
+t kill-pane -t "$mate" && echo closed
+exec sleep 100
+"#,
+    );
+    let home = env.root.join("work");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        env.root.join("config/kraal/accounts.toml"),
+        format!("[[account]]\nid = \"test-claude-work\"\nagent = \"claude\"\nname = \"work\"\nhome = {home:?}\n"),
+    )
+    .unwrap();
+    env.workspace("w", "layout { pane name=\"shell\" }\n");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    // A key in the server's environment, which an account's agent must not use.
+    let out = env.cmd(&["open", "w"]).env("PATH", &path).env("ANTHROPIC_API_KEY", "server-key").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let socket = env.root.join("run/kraal/teams.sock");
+    let out = env.cmd(&["agent", "claude", "--teams", "--tab"]).env("KRAAL_SOCKET", &socket).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let lead = String::from_utf8(out.stdout).unwrap().trim().to_string();
+    let screen = env.wait_for_text(&lead, "(outside)");
+    let panes: serde_json::Value = serde_json::from_str(&env.run(&["panes", "--json"])).unwrap();
+    let panes = panes.as_array().unwrap();
+    let mate = panes.iter().find(|p| p["name"] == "researcher").expect("the teammate's pane");
+    let (mate, tab) = (mate["id"].to_string(), mate["tab"].clone());
+    assert!(screen.contains(&format!("lead %{lead} @{lead} %{lead} %{mate} %")), "{screen}");
+    assert!(screen.contains("teams=1 args=") && screen.contains("--teammate-mode auto"), "{screen}");
+    // Its own tmux: the real one, outside the team's; and no pane outside the team.
+    assert!(screen.contains("real-tmux new-session -d -s build TMUX="), "{screen}");
+    assert!(screen.contains("%1 is not a pane of this agent team (outside)"), "{screen}");
+    // The teammate runs next to its lead, on its account, and is not inside tmux itself.
+    let lead_tab =
+        panes.iter().find(|p| p["id"].as_u64().is_some_and(|i| i.to_string() == lead)).unwrap()["tab"].clone();
+    assert_eq!(tab, lead_tab);
+    env.wait_for_text(&mate, "mate tmux= key=\n");
+    // One that fails stays, with what it said.
+    let failing = panes.iter().map(|p| p["id"].to_string()).max_by_key(|id| id.parse::<u32>().unwrap()).unwrap();
+    assert_ne!(failing, mate);
+    env.wait_for_text(&failing, "boom");
+    env.run(&["send", "-p", &lead, "go\r"]);
+    env.wait_for_text(&lead, "closed");
+    assert!(!env.run(&["panes"]).contains("researcher"));
+    assert!(env.run(&["read", "-p", &failing]).contains("boom"));
+    // Not for other agents, nor outside kraal, nor in this terminal.
+    let out = env.cmd(&["agent", "codex", "--teams"]).env("KRAAL_SOCKET", &socket).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--teams is for Claude Code"));
+    let out = env.cmd(&["agent", "claude", "--teams"]).env_remove("KRAAL_SOCKET").output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--teams works inside kraal"));
+    let out = env.cmd(&["agent", "claude", "--teams", "--here"]).env("KRAAL_SOCKET", &socket).output().unwrap();
+    assert!(!out.status.success());
+}

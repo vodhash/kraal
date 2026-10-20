@@ -26,6 +26,11 @@ pub fn main() {
         eprintln!("kraal: run by a test, {theirs}");
         std::process::exit(1);
     }
+    // `tmux`, as `kraal agent --teams` puts this binary in Claude's PATH.
+    let mut argv = std::env::args_os();
+    if argv.next().is_some_and(|a| std::path::Path::new(&a).file_name() == Some("tmux".as_ref())) {
+        std::process::exit(crate::tmux::main(argv.collect()));
+    }
     let cli = Cli::read();
     // Plain CLI commands should die quietly when piped into `head`; the server and the attached
     // client handle broken sockets themselves.
@@ -159,9 +164,9 @@ fn run(cli: Cli) -> Result<()> {
         }
         Some(Cmd::Tunnel { action }) => remote::tunnel(&s, action),
         Some(Cmd::Accounts { action }) => agents::accounts(action.unwrap_or(AccountsCmd::List { json: false })),
-        Some(Cmd::Agent { agent, account, right, down, floating, tab, here, args }) => {
+        Some(Cmd::Agent { agent, account, right, down, floating, tab, here, teams, args }) => {
             let placement = placement(right, down, floating, tab).unwrap_or(Placement::Auto);
-            agents::agent(&s, agent, account, placement, here, args)
+            agents::agent(&s, agent, account, placement, here, teams, args)
         }
         Some(Cmd::Wt { action }) => agents::worktrees(&s, action),
         Some(Cmd::Statusline) => {

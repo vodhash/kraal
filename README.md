@@ -33,6 +33,9 @@ uses, the server it is on, and whether that server is production.
   running in kraal on your servers are listed too. `alt+a` jumps to the next one that needs you.
 - **Several agents on one repository.** Start an agent in its own worktree and branch, then
   review, commit, open a pull request or merge without leaving kraal.
+- **Claude Code agent teams in kraal panes.** `kraal agent claude --teams`: each teammate opens
+  in its own pane next to the lead, followed like any other agent.
+  [Agent teams](docs/agents.md#claude-code-agent-teams)
 - **Named Claude and Codex accounts.** See each account's 5-hour and weekly usage, choose
   accounts per project, and change an agent pane's account with an Undo action. Claude can
   continue a verified conversation; changing Codex accounts starts a new one.
