@@ -46,6 +46,17 @@ version each session runs. A different protocol version refuses attachment with 
 naming both versions. Run `kraal restart` to bring an older local server onto the installed
 binary. See [Compatibility](compatibility.md#clients-and-servers).
 
+## With Homebrew
+
+On macOS and Linux:
+
+```sh
+brew install vodhash/tap/kraal
+```
+
+`brew upgrade kraal` updates it, to each release as it comes out; `kraal update` leaves a kraal
+that Homebrew installed to Homebrew.
+
 ## With Cargo
 
 The latest release, from crates.io, with Rust 1.88 or later:

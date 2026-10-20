@@ -1,0 +1,25 @@
+# kraal-bin on the AUR, put there by kraal's release workflow (packaging/aur/publish.sh).
+pkgname=kraal-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Terminal workspaces for coding agents and SSH fleets"
+arch=('x86_64' 'aarch64')
+url="https://github.com/vodhash/kraal"
+license=('Apache-2.0')
+provides=('kraal')
+conflicts=('kraal')
+optdepends=('openssh: connecting to servers'
+            'git: worktrees and branches for agents')
+# A static binary, built and stripped already.
+options=('!strip' '!debug')
+# Named with the version: an archive kept from the previous release is not taken for this one's.
+source_x86_64=("kraal-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/kraal-x86_64-unknown-linux-musl.tar.gz")
+source_aarch64=("kraal-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/kraal-aarch64-unknown-linux-musl.tar.gz")
+sha256sums_x86_64=('@SHA256 x86_64-unknown-linux-musl@')
+sha256sums_aarch64=('@SHA256 aarch64-unknown-linux-musl@')
+
+package() {
+    cd "kraal-$CARCH-unknown-linux-musl"
+    install -Dm755 kraal "$pkgdir/usr/bin/kraal"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
