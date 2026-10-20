@@ -299,6 +299,12 @@ pub fn request(socket: &Path, req: Request) -> Result<Response> {
     request_connected(socket, stream, req)
 }
 
+/// This command's line, as a question about it quotes it.
+pub(crate) fn command_line() -> String {
+    let words: Vec<String> = std::iter::once("kraal".to_string()).chain(std::env::args().skip(1)).collect();
+    crate::shell::join(&words)
+}
+
 /// Refuse before preparation that would otherwise modify local files.
 pub(crate) fn require_protocol(socket: &Path) -> Result<()> {
     let server = ping(socket)?;
@@ -329,7 +335,8 @@ pub fn upgrade_request_within(socket: &Path, req: Request, limit: Duration) -> R
     let deadline = Instant::now() + limit;
     let version = if matches!(req, Request::Ping) { protocol::upgrade_protocol() } else { ping(socket)?.protocol };
     let mut stream = UnixStream::connect(socket)?;
-    exchange_until(&mut stream, &ClientMsg::Request { version, request: req }, deadline)?.map_err(anyhow::Error::msg)
+    exchange_until(&mut stream, &ClientMsg::Request { version, request: req, origin: None }, deadline)?
+        .map_err(anyhow::Error::msg)
 }
 
 /// [`exchange`], given up on at `deadline`: the server sends one answer.
@@ -360,6 +367,7 @@ fn exchange(stream: &mut UnixStream, msg: &ClientMsg) -> Result<Result<Response,
                 | ServerMsg::Events { .. }
                 | ServerMsg::Attached { .. }
                 | ServerMsg::ClipboardFocus { .. }
+                | ServerMsg::DisplayMark { .. }
                 | ServerMsg::Clipboard { .. }
                 | ServerMsg::AttachmentPrepared { .. }
                 | ServerMsg::ClipboardImageOffer { .. }
@@ -519,7 +527,11 @@ fn stop_server(socket: &Path, restart: bool) -> Result<Saved> {
     if uid != unsafe { libc::getuid() } {
         bail!("{} belongs to another user", socket.display());
     }
-    let ask = ClientMsg::Request { version: protocol::upgrade_protocol(), request: Request::KillServer { restart } };
+    let ask = ClientMsg::Request {
+        version: protocol::upgrade_protocol(),
+        request: Request::KillServer { restart },
+        origin: None,
+    };
     let answer = exchange_until(&mut stream, &ask, deadline).and_then(|a| a.map_err(anyhow::Error::msg));
     let saved = match answer {
         Ok(Response::Text(why)) => Saved::No(why),
@@ -1329,6 +1341,14 @@ pub fn attach(mut target: Target, mut workspace: Option<String>, mouse: bool, at
                             Ok(msg @ ServerMsg::ClipboardFocus { .. }) => {
                                 attachments.message(msg);
                             }
+                            // The frames before it were written to the terminal above, in order;
+                            // under a local question they are not on screen, and the repaint asked
+                            // once it closes brings the mark again.
+                            Ok(ServerMsg::DisplayMark { id }) if !attachments.covers() => {
+                                if let Some(w) = writer.lock().unwrap().as_mut() {
+                                    let _ = protocol::write_json(w, &ClientMsg::Displayed { id });
+                                }
+                            }
                             Ok(msg @ ServerMsg::ClipboardImageOffer { .. }) => {
                                 attachments.message(msg);
                             }
@@ -1503,7 +1523,7 @@ mod tests {
         assert_eq!(refusal_version("no such workspace"), None);
         assert_eq!(
             refusal_version(
-                "protocol mismatch: client protocol 5, server protocol 3 (kraal 0.4.0, session work); run `kraal -s work restart`"
+                "protocol mismatch: client protocol 6, server protocol 3 (kraal 0.4.0, session work); run `kraal -s work restart`"
             ),
             Some((3, "0.4.0")),
         );
@@ -1527,7 +1547,7 @@ mod tests {
                 clipboard_native: false,
             };
             let reason = format!(
-                "protocol mismatch: client protocol 5, server protocol 3 (kraal 0.4.0, session {session}); run `kraal -s {session} restart`"
+                "protocol mismatch: client protocol 6, server protocol 3 (kraal 0.4.0, session {session}); run `kraal -s {session} restart`"
             );
             let rewritten = attach_refusal(&reason, &target).unwrap();
             let command =
@@ -1535,7 +1555,7 @@ mod tests {
             assert_eq!(
                 rewritten,
                 format!(
-                    "protocol mismatch: client protocol 5, server protocol 3 (kraal 0.4.0, session {session}); run `{command}`"
+                    "protocol mismatch: client protocol 6, server protocol 3 (kraal 0.4.0, session {session}); run `{command}`"
                 )
             );
             assert_eq!(attach_refusal("no such workspace", &target), None);

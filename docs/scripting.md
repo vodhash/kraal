@@ -110,6 +110,8 @@ Buffers hold text, in the server's memory only unless `[buffers] persist = true`
 Types: `workspace.opened/closed`, `pane.opened/exited/failed/closed`, `agent.working/blocked/done/
 idle`, `ssh.started/ended` (an `ssh` process appeared or ended in a pane, whether or not it got
 connected), `production.entered/left` (`entered` again when the reason changes),
+`production.approved/refused` (an agent's production action, allowed or refused; see
+[Agents](production.md#agents)),
 `notification`, `tunnel.up/down`, `port.opened/closed`, `account.limit`,
 `runbook.started/finished`, `command.finished` (a command the shell marks ended: its `command`
 line, `exit` status and `seconds`; see [Shell commands](terminal.md#shell-commands)).

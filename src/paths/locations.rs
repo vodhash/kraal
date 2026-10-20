@@ -321,6 +321,17 @@ pub(super) fn shorten_home_in(path: &Path, home: &Path) -> String {
     path.display().to_string()
 }
 
+/// Whether `path` is the developer's while a test runs this kraal (debug builds, as
+/// [`of_the_developer`] tells): their session, which a test's command may run under.
+pub fn kept_out(path: &Path) -> bool {
+    #[cfg(debug_assertions)]
+    if let Some(keep_out) = std::env::var_os("KRAAL_TEST_KEEP_OUT") {
+        return std::env::split_paths(&keep_out).any(|theirs| path.starts_with(theirs));
+    }
+    let _ = path;
+    false
+}
+
 /// What this kraal would use of the developer's while a test runs it, if anything. Debug builds
 /// only: the tests run kraal in directories of their own and name in `KRAAL_TEST_KEEP_OUT`, as
 /// `PATH` names its directories, the developer's home and where their sessions are. A test that

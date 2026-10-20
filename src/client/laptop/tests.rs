@@ -109,11 +109,14 @@ fn listing_requires_consent_always_survives_attach_and_removal_revokes_it() {
     client.request(1, Side::Left, 1, "~".into());
     nothing(&mut peer);
     assert!(client.state.lock().unwrap().prompt.is_some());
+    // The question covers the server's frames: the client tells the server nothing is displayed.
+    assert!(client.covers());
     client.input(b"\x1b[200~\r\x1b[201~");
     nothing(&mut peer);
     client.input(b"\x1b");
     client.input(b"");
     assert!(result(&mut peer).unwrap_err().contains("refused: nothing was listed"));
+    assert!(!client.covers());
     assert!(!permissions.exists());
     client.request(1, Side::Left, 2, "~".into());
     nothing(&mut peer);

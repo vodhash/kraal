@@ -65,6 +65,16 @@ pub fn command_env(pid: u32, names: &[&str]) -> Option<(Vec<String>, HashMap<Str
     Some((argv, env))
 }
 
+/// The kraal variables of `pid`'s environment, or of the nearest process it runs under that
+/// has any: what places a command in a kraal pane, even when it dropped them itself. A session
+/// of the developer's, which tests may be run from, does not count while they run.
+pub fn kraal_env(pid: u32) -> HashMap<String, String> {
+    let names = ["KRAAL_SESSION", "KRAAL_PANE", "KRAAL_SOCKET"];
+    let theirs =
+        |env: &HashMap<String, String>| env.get("KRAAL_SOCKET").is_some_and(|s| crate::paths::kept_out(Path::new(s)));
+    lineage(pid).into_iter().map(|p| environ(p, &names)).find(|env| !env.is_empty() && !theirs(env)).unwrap_or_default()
+}
+
 #[cfg(test)]
 thread_local! {
     pub(crate) static FAIL_ARGV: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
