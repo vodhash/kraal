@@ -175,10 +175,16 @@ jobs:
           ssh-keygen -lf /home/builder/.ssh/known_hosts > /tmp/aur-host
           grep -q 'SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4 ' /tmp/aur-host
           chown -R builder: /home/builder
-          # An account not made yet (or a key not added to it): said, not failed.
+          # An account not made yet (or a key not added to it): said, not failed. Any other error
+          # fails, to be run again.
           if ! out=$(sudo -u builder ssh -i /home/builder/.ssh/aur -o IdentitiesOnly=yes aur@aur.archlinux.org help 2>&1); then
-            echo "::warning::the AUR refused the key of AUR_SSH_PRIVATE_KEY (add its public key to the AUR account): $out"
-            exit 0
+            case $out in
+              *"Permission denied (publickey)"*)
+                echo "::warning::the AUR does not know the key of AUR_SSH_PRIVATE_KEY: add its public key to the AUR account"
+                exit 0 ;;
+            esac
+            echo "$out"
+            exit 1
           fi
           sudo -u builder git config --global user.name "github-actions[bot]"
           sudo -u builder git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"

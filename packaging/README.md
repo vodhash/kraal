@@ -11,7 +11,9 @@ crate, on each tag `v<version>`, from that release's `SHA256SUMS`:
 Without its secret, a job publishes nothing and says so; an AUR key the AUR does not know (an
 account not made yet) is a warning, not a failure. To publish a release again (a key added since),
 run that job again alone (Re-run job): running all the jobs stops at the release, which exists.
-A run for an older release than the one published leaves it. `fill.sh` fills a template; each `publish.sh`
+GitHub runs a job again for 30 days; later, the next release publishes it, or `publish.sh` run by
+hand with a key the tap or the AUR account knows. A run for an older release than the one
+published leaves it. `fill.sh` fills a template; each `publish.sh`
 takes `DRY_RUN=1` to stop before reaching the tap or the AUR (the AUR one builds the package with
 makepkg first, so it needs Arch):
 
