@@ -1341,8 +1341,10 @@ pub fn attach(mut target: Target, mut workspace: Option<String>, mouse: bool, at
                             Ok(msg @ ServerMsg::ClipboardFocus { .. }) => {
                                 attachments.message(msg);
                             }
-                            // The frames before it were written to the terminal above, in order.
-                            Ok(ServerMsg::DisplayMark { id }) => {
+                            // The frames before it were written to the terminal above, in order;
+                            // under a local question they are not on screen, and the repaint asked
+                            // once it closes brings the mark again.
+                            Ok(ServerMsg::DisplayMark { id }) if !attachments.covers() => {
                                 if let Some(w) = writer.lock().unwrap().as_mut() {
                                     let _ = protocol::write_json(w, &ClientMsg::Displayed { id });
                                 }

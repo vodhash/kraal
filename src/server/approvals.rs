@@ -321,6 +321,16 @@ impl Server {
         }
     }
 
+    /// Client `id` asks for a whole frame: its screen was covered (a local question of the
+    /// client closed), so a question there counts as displayed only once that frame is.
+    pub(super) fn production_repaint(&mut self, id: ClientId) {
+        for (client, display) in self.production_asks.iter_mut().filter_map(|a| a.shown.as_mut()) {
+            if *client == id {
+                *display = Display::Pending;
+            }
+        }
+    }
+
     /// Client `id` displayed the question about action `ask`.
     pub(super) fn production_displayed(&mut self, id: ClientId, ask: u32) {
         if let Some(a) = self.production_asks.iter_mut().find(|a| a.id == ask && a.shown == Some((id, Display::Marked)))
@@ -1065,6 +1075,46 @@ mod tests {
         s.server.client_frame(s.ui, protocol::JSON, ack);
         s.server.client_input(s.ui, b"y");
         assert!(receive.is_empty(), "just displayed: not read yet");
+        std::thread::sleep(SEEN);
+        s.server.client_input(s.ui, b"y");
+        assert!(matches!(response(&receive), Ok(Response::Ok)));
+    }
+
+    /// A local question of the client covered the production question (laptop files over
+    /// `attach --host`): its repaint makes the question count as displayed only once the client
+    /// says again that it drew it.
+    #[test]
+    fn a_question_covered_on_the_client_is_displayed_again_after_its_repaint() {
+        let mut s = setup();
+        let held = s.server.clients.get_mut(&s.ui).unwrap().out.capture();
+        let marks = |held: &crossbeam_channel::Receiver<Vec<u8>>| {
+            let mut frames = std::io::Cursor::new(held.try_iter().flatten().collect::<Vec<u8>>());
+            let mut marks = Vec::new();
+            while let Some((kind, payload)) = protocol::read_frame(&mut frames).unwrap() {
+                if kind == protocol::JSON
+                    && let Ok(ServerMsg::DisplayMark { id }) = serde_json::from_slice(&payload)
+                {
+                    marks.push(id);
+                }
+            }
+            marks
+        };
+        let (id, _peer, receive) = caller(&mut s.server, s.agent);
+        assert!(matches!(s.server.request(id, exec("covered")), RequestOutcome::Deferred));
+        let ask = asking(&s.server, s.ui).unwrap();
+        s.server.render_clients();
+        assert_eq!(marks(&held), [ask]);
+        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
+        s.server.client_frame(s.ui, protocol::JSON, ack.clone());
+        std::thread::sleep(SEEN);
+        // The client's own question covered it until now.
+        let repaint = serde_json::to_vec(&crate::protocol::ClientMsg::Repaint).unwrap();
+        s.server.client_frame(s.ui, protocol::JSON, repaint);
+        s.server.client_input(s.ui, b"y");
+        assert!(asking(&s.server, s.ui).is_some() && receive.is_empty(), "covered: no answer");
+        s.server.render_clients();
+        assert_eq!(marks(&held), [ask], "the repainted frame carries the mark again");
+        s.server.client_frame(s.ui, protocol::JSON, ack);
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(matches!(response(&receive), Ok(Response::Ok)));

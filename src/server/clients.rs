@@ -195,6 +195,7 @@ impl Server {
             }
             ClientMsg::Displayed { id: ask } => self.production_displayed(id, ask),
             ClientMsg::Repaint => {
+                self.production_repaint(id);
                 if let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached) {
                     c.encoder.invalidate();
                     c.dirty = Dirty::Yes;

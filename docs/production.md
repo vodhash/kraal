@@ -64,7 +64,9 @@ when that client shows no other question or form and no file transfer holds its 
 questions come one at a time. Your client tells kraal once it has drawn the question on your
 terminal, over `attach --host` too: keys that reach kraal before that, or in the 0.3 s after
 (held during a transfer, sent together with the key before it, or typed while a slow connection
-still carries the question), do not answer it. **Cancel**, selected first, refuses: the command fails with
+still carries the question), do not answer it. A local question of your client (laptop files over
+`attach --host`) that covers it means it is drawn again, and told again, once that question
+closes. **Cancel**, selected first, refuses: the command fails with
 `refused in kraal: nothing was done`. With no client attached, the command is refused at once.
 
 What you allow is what runs: the text, keys or buffer as they were when you were asked. If what
