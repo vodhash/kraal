@@ -15,6 +15,12 @@ fi
 repo=$(mktemp -d)
 git clone -q --depth 1 "git@github.com:$tap.git" "$repo"
 mkdir -p "$repo/Formula"
+# A late run for an older release (a job run again) never takes the tap back.
+current=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$repo/Formula/kraal.rb" 2>/dev/null || true)
+if [ -n "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" ]; then
+    echo "$tap has kraal $current, newer than $version: left as it is"
+    exit 0
+fi
 cp "$formula" "$repo/Formula/kraal.rb"
 cd "$repo"
 git add Formula/kraal.rb

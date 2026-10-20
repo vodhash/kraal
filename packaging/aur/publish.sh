@@ -19,6 +19,12 @@ if [ "${DRY_RUN:-}" = 1 ]; then
 fi
 repo=$(mktemp -d)
 git clone -q ssh://aur@aur.archlinux.org/kraal-bin.git "$repo"
+# A late run for an older release (a job run again) never takes the AUR back.
+current=$(sed -n 's/^pkgver=//p' "$repo/PKGBUILD" 2>/dev/null || true)
+if [ -n "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" ]; then
+    echo "the AUR has kraal-bin $current, newer than $version: left as it is"
+    exit 0
+fi
 cp "$build/PKGBUILD" "$build/.SRCINFO" "$repo/"
 cd "$repo"
 git add PKGBUILD .SRCINFO

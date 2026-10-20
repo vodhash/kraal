@@ -9,7 +9,9 @@ crate, on each tag `v<version>`, from that release's `SHA256SUMS`:
 | AUR (`kraal-bin`) | `aur/PKGBUILD.in` | `aur/publish.sh`, in an Arch container | secret `AUR_SSH_PRIVATE_KEY`: a key whose public half is in the AUR account; `vars.AUR_MAINTAINER` for the PKGBUILD's maintainer line |
 
 Without its secret, a job publishes nothing and says so; an AUR key the AUR does not know (an
-account not made yet) is a warning, not a failure. `fill.sh` fills a template; each `publish.sh`
+account not made yet) is a warning, not a failure. To publish a release again (a key added since),
+run that job again alone (Re-run job): running all the jobs stops at the release, which exists.
+A run for an older release than the one published leaves it. `fill.sh` fills a template; each `publish.sh`
 takes `DRY_RUN=1` to stop before reaching the tap or the AUR (the AUR one builds the package with
 makepkg first, so it needs Arch):
 
