@@ -729,6 +729,11 @@ fn agents_started_directly_resume_with_their_arguments() {
         (argv("claude --resume abc --model opus"), true),
         "a picker's -r has no value: the option after it stays"
     );
+    assert_eq!(
+        resume_argv(claude, &argv("claude --model opus --remote-control"), "abc").unwrap(),
+        (argv("claude --resume abc --model opus --remote-control"), true),
+        "kraal agent --remote stays on Remote Control"
+    );
     assert!(resume_argv(claude, &argv("claude"), "x; rm -rf /").is_none());
     assert!(resume_argv(claude, &argv("vim"), "abc").is_none());
     let codex = agent_kind("codex").unwrap();

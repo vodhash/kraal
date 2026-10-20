@@ -33,6 +33,9 @@ uses, the server it is on, and whether that server is production.
   running in kraal on your servers are listed too. `alt+a` jumps to the next one that needs you.
 - **Several agents on one repository.** Start an agent in its own worktree and branch, then
   review, commit, open a pull request or merge without leaving kraal.
+- **Answer them from your phone.** `kraal agent claude --remote` puts Claude on Remote Control:
+  approve its permission prompts from the Claude app while kraal keeps it running.
+  [From your phone](docs/agents.md#from-your-phone)
 - **Claude Code agent teams in kraal panes.** `kraal agent claude --teams`: each teammate opens
   in its own pane next to the lead, followed like any other agent.
   [Agent teams](docs/agents.md#claude-code-agent-teams)

@@ -387,6 +387,10 @@ pub enum Cmd {
         /// runs as if inside tmux, and kraal answers as tmux).
         #[arg(long, conflicts_with = "here")]
         teams: bool,
+        /// Claude Code: on Remote Control, to follow and answer it from the Claude app on your
+        /// phone or claude.ai/code while kraal keeps it running.
+        #[arg(long)]
+        remote: bool,
         /// Arguments for the agent.
         #[arg(last = true)]
         args: Vec<String>,

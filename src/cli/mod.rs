@@ -164,8 +164,9 @@ fn run(cli: Cli) -> Result<()> {
         }
         Some(Cmd::Tunnel { action }) => remote::tunnel(&s, action),
         Some(Cmd::Accounts { action }) => agents::accounts(action.unwrap_or(AccountsCmd::List { json: false })),
-        Some(Cmd::Agent { agent, account, right, down, floating, tab, here, teams, args }) => {
+        Some(Cmd::Agent { agent, account, right, down, floating, tab, here, teams, remote, args }) => {
             let placement = placement(right, down, floating, tab).unwrap_or(Placement::Auto);
+            let args = if remote { agents::remote_args(&agent, args)? } else { args };
             agents::agent(&s, agent, account, placement, here, teams, args)
         }
         Some(Cmd::Wt { action }) => agents::worktrees(&s, action),
