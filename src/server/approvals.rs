@@ -15,7 +15,7 @@ use crate::layout::PaneId;
 
 /// How long after a question reaches a terminal keys are still taken as typed before it was seen.
 const SEEN: std::time::Duration = std::time::Duration::from_millis(300);
-use crate::protocol::{Origin, Request, Response};
+use crate::protocol::{self, Origin, Request, Response, ServerMsg};
 
 /// A request held until the user answers, and who asked.
 pub(super) struct ProductionAsk {
@@ -24,9 +24,21 @@ pub(super) struct ProductionAsk {
     pane: PaneId,
     agent: String,
     need: Need,
-    /// The client asked, and the number of its message that first carried the question: a key
-    /// before that frame was written to its terminal, and read, does not answer it.
-    shown: Option<(ClientId, Option<u64>)>,
+    /// The client asked, and how far the question got there: a key before the client displayed
+    /// it, and read it, does not answer it.
+    shown: Option<(ClientId, Display)>,
+}
+
+/// How far a question got on the client asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Display {
+    /// In no frame sent yet.
+    Pending,
+    /// A frame carried it, then a [`ServerMsg::DisplayMark`] the client answers once it wrote
+    /// that frame to its terminal.
+    Marked,
+    /// The client displayed it then.
+    At(std::time::Instant),
 }
 
 /// What a request would do on production: the command (`exec`, `send`…), what it runs or
@@ -281,21 +293,40 @@ impl Server {
     }
 
     /// Whether a key from client `id` comes before the user could see the question about action
-    /// `ask`: the frame that shows it is not written to the terminal yet (a client that reads
-    /// slowly, a key queued with the request or held then replayed), or just was.
+    /// `ask`: the client has not said it displayed it (a client that reads slowly or far away, a
+    /// key queued with the request or held then replayed), or just did.
     pub(super) fn ask_not_drawn(&self, id: ClientId, ask: u32) -> bool {
-        let written = |seq: Option<u64>| seq.and_then(|s| self.clients.get(&id)?.out.written_at(s));
         self.production_asks.iter().any(|a| {
-            a.id == ask && a.shown.is_some_and(|(c, seq)| c == id && written(seq).is_none_or(|at| at.elapsed() < SEEN))
+            a.id == ask
+                && a.shown.is_some_and(|(c, d)| c == id && !matches!(d, Display::At(at) if at.elapsed() >= SEEN))
         })
     }
 
-    /// A frame went to client `id` as its message `seq`: the first since a question showed there
-    /// carries it, and when it is written is watched.
-    pub(super) fn frame_sent(&mut self, id: ClientId, seq: u64) {
-        let Some(ask) = self.production_asks.iter_mut().find(|a| a.shown == Some((id, None))) else { return };
-        ask.shown = Some((id, Some(seq)));
-        self.clients[&id].out.watch(seq);
+    /// A frame went to client `id`: the first since a question showed there carries it, and a
+    /// mark follows it for the client to answer once that frame is on its terminal.
+    pub(super) fn frame_sent(&mut self, id: ClientId) {
+        let Some(ask) = self.production_asks.iter_mut().find(|a| a.shown == Some((id, Display::Pending))) else {
+            return;
+        };
+        let mut mark = Vec::new();
+        let _ = protocol::write_json(&mut mark, &ServerMsg::DisplayMark { id: ask.id });
+        let Some(c) = self.clients.get_mut(&id) else { return };
+        if c.out.try_send(mark).is_ok() {
+            ask.shown = Some((id, Display::Marked));
+        } else {
+            // A client behind: a whole frame carries the question again, then its mark.
+            c.encoder.invalidate();
+            c.dirty = Dirty::Yes;
+            self.next_render = Some(std::time::Instant::now() + super::FRAME);
+        }
+    }
+
+    /// Client `id` displayed the question about action `ask`.
+    pub(super) fn production_displayed(&mut self, id: ClientId, ask: u32) {
+        if let Some(a) = self.production_asks.iter_mut().find(|a| a.id == ask && a.shown == Some((id, Display::Marked)))
+        {
+            a.shown = Some((id, Display::At(std::time::Instant::now())));
+        }
     }
 
     /// Ask about the first action waiting, unless a question about one shows already: on a
@@ -332,7 +363,7 @@ impl Server {
         else {
             return;
         };
-        self.production_asks[0].shown = Some((id, None));
+        self.production_asks[0].shown = Some((id, Display::Pending));
         let first = &self.production_asks[0];
         let quoted: Vec<String> = first.need.plan.lines().map(|l| format!(" {l}")).collect();
         let message = format!(
@@ -599,6 +630,14 @@ mod tests {
         let RequestOutcome::Immediate { reply, result } = outcome else { panic!("an immediate answer") };
         reply.complete(server, result.clone());
         result
+    }
+
+    /// A frame goes to `ui`, and its client says it displayed the question, as a client does.
+    fn displayed(s: &mut Setup) {
+        s.server.render_clients();
+        let ask = asking(&s.server, s.ui).expect("the user is asked");
+        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
+        s.server.client_frame(s.ui, protocol::JSON, ack);
     }
 
     fn typed(s: &Setup) -> bool {
@@ -975,7 +1014,7 @@ mod tests {
         assert!(asking(&s.server, s.ui).is_some(), "the question shows, unanswered");
         s.server.client_input(s.ui, b"y");
         assert!(receive.is_empty(), "no frame showed the question yet");
-        s.server.render_clients();
+        displayed(&mut s);
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(matches!(response(&receive), Ok(Response::Ok)));
@@ -984,32 +1023,48 @@ mod tests {
         assert!(matches!(s.server.request(id, exec("queued-key")), RequestOutcome::Deferred));
         s.server.client_input(s.ui, b"y");
         assert!(asking(&s.server, s.ui).is_some() && receive.is_empty());
-        s.server.render_clients();
+        displayed(&mut s);
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(matches!(response(&receive), Ok(Response::Ok)));
     }
 
-    /// A frame queued for a client that reads slowly has not shown the question yet: keys before
-    /// it is written, and in the moment after, do not answer it; later ones do.
+    /// A question shows once its client says it displayed it, which a client far away (`attach
+    /// --host`) or reading slowly says late: keys before that, and in the moment after, do not
+    /// answer it; later ones do.
     #[test]
-    fn keys_before_the_question_reached_the_terminal_do_not_answer_it() {
+    fn keys_before_the_client_displayed_the_question_do_not_answer_it() {
         let mut s = setup();
         let held = s.server.clients.get_mut(&s.ui).unwrap().out.capture();
         let (id, _peer, receive) = caller(&mut s.server, s.agent);
-        assert!(matches!(s.server.request(id, exec("slow-reader")), RequestOutcome::Deferred));
+        assert!(matches!(s.server.request(id, exec("far-client")), RequestOutcome::Deferred));
+        let ask = asking(&s.server, s.ui).unwrap();
         s.server.render_clients();
-        assert!(!held.is_empty(), "the frame showing the question is queued");
+        // The frame showing the question, then the mark the client answers.
+        let sent: Vec<u8> = held.try_iter().flatten().collect();
+        let mut frames = std::io::Cursor::new(sent);
+        let mut marks = Vec::new();
+        while let Some((kind, payload)) = protocol::read_frame(&mut frames).unwrap() {
+            if kind == protocol::JSON
+                && let Ok(ServerMsg::DisplayMark { id }) = serde_json::from_slice(&payload)
+            {
+                marks.push(id);
+            }
+        }
+        assert_eq!(marks, [ask]);
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
-        assert!(asking(&s.server, s.ui).is_some() && receive.is_empty(), "not written: no answer");
-        // The writer thread writes what was queued.
-        let out = &s.server.clients[&s.ui].out;
-        for _ in held.try_iter() {
-            out.wrote_one();
-        }
+        assert!(asking(&s.server, s.ui).is_some() && receive.is_empty(), "not displayed: no answer");
+        // Another question's mark, or another client's, displays nothing here.
+        let other = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask + 1 }).unwrap();
+        s.server.client_frame(s.ui, protocol::JSON, other);
+        let ack = serde_json::to_vec(&crate::protocol::ClientMsg::Displayed { id: ask }).unwrap();
+        s.server.client_frame(id, protocol::JSON, ack.clone());
         s.server.client_input(s.ui, b"y");
-        assert!(receive.is_empty(), "just written: not read yet");
+        assert!(receive.is_empty(), "nothing displayed it on this client");
+        s.server.client_frame(s.ui, protocol::JSON, ack);
+        s.server.client_input(s.ui, b"y");
+        assert!(receive.is_empty(), "just displayed: not read yet");
         std::thread::sleep(SEEN);
         s.server.client_input(s.ui, b"y");
         assert!(matches!(response(&receive), Ok(Response::Ok)));

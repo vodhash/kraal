@@ -61,9 +61,10 @@ The question names the agent and its pane, quotes what runs (the command line, a
 plan, the text or keys to type, the buffer to paste, the line each server runs) and lists the
 production panes and servers. It opens on a client that shows the pane, else the one used last,
 when that client shows no other question or form and no file transfer holds its typing;
-questions come one at a time. Keys that reach kraal before the question is written to your terminal, or in the
-0.3 s after (held during a transfer, sent together with the key before it, or typed while a
-slow connection still carries it), do not answer it. **Cancel**, selected first, refuses: the command fails with
+questions come one at a time. Your client tells kraal once it has drawn the question on your
+terminal, over `attach --host` too: keys that reach kraal before that, or in the 0.3 s after
+(held during a transfer, sent together with the key before it, or typed while a slow connection
+still carries the question), do not answer it. **Cancel**, selected first, refuses: the command fails with
 `refused in kraal: nothing was done`. With no client attached, the command is refused at once.
 
 What you allow is what runs: the text, keys or buffer as they were when you were asked. If what

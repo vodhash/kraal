@@ -197,6 +197,10 @@ pub enum ClientMsg {
     },
     /// Restore terminal content without taking layout control.
     Repaint,
+    /// The frames before [`ServerMsg::DisplayMark`] `id` are on the terminal.
+    Displayed {
+        id: u32,
+    },
     Detach,
     /// Reserve the destination while the client classifies a buffered paste.
     PasteStart,
@@ -321,6 +325,11 @@ pub enum ServerMsg {
         /// The focused pane, only when the client mode allows a clipboard shortcut.
         pane: Option<crate::layout::PaneId>,
         agent: bool,
+    },
+    /// The frames before it show question `id`: answer [`ClientMsg::Displayed`] once they are on
+    /// the terminal.
+    DisplayMark {
+        id: u32,
     },
     AttachmentPrepared {
         token: String,
@@ -1037,6 +1046,7 @@ mod tests {
             },
             ClientMsg::Resize { cols: 80, rows: 24 },
             ClientMsg::Repaint,
+            ClientMsg::Displayed { id: 4 },
             ClientMsg::Detach,
             ClientMsg::PasteStart,
             ClientMsg::ClipboardPaste { pane: 7, key: vec![0x16], text: b"text".to_vec(), token: None },
@@ -1132,6 +1142,7 @@ mod tests {
             ServerMsg::Open { url: s("https://example.com") },
             ServerMsg::ClipboardFocus { pane: Some(7), agent: true },
             ServerMsg::ClipboardFocus { pane: None, agent: false },
+            ServerMsg::DisplayMark { id: 4 },
             ServerMsg::Clipboard { id: 1, origin: ClipboardOrigin::User, text: s("hello") },
             ServerMsg::AttachmentPrepared {
                 token: s("ab"),

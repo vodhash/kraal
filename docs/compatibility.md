@@ -38,7 +38,8 @@ See [Workspace identities](workspaces.md#workspace-identities) and [Accounts](ag
 ## Clients and servers
 
 This version uses protocol 6, which lets a command run in an agent's pane wait for you to allow a
-production action ([Production](production.md#agents)). Kraal 0.5.x used protocol 5, which binds a
+production action, the client saying when it has drawn the question
+([Production](production.md#agents)). Kraal 0.5.x used protocol 5, which binds a
 pasted clipboard text to the agent pane that received Ctrl+V; Kraal 0.4.1 used protocol 4, Kraal
 0.4.0 protocol 3, and Kraal 0.2.0 and 0.3.0 protocol 2.
 Different protocol versions refuse attachment and ordinary commands, and production commands

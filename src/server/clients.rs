@@ -2,8 +2,8 @@
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{SendTimeoutError, TrySendError};
@@ -193,6 +193,7 @@ impl Server {
                 self.probe_cell_size(id);
                 self.relayout();
             }
+            ClientMsg::Displayed { id: ask } => self.production_displayed(id, ask),
             ClientMsg::Repaint => {
                 if let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached) {
                     c.encoder.invalidate();
@@ -394,9 +395,6 @@ pub struct Outbox {
     queue: crossbeam_channel::Sender<Vec<u8>>,
     /// Messages queued and not written yet.
     queued: Arc<AtomicUsize>,
-    /// Messages taken so far: the number of the last one.
-    sent: AtomicU64,
-    written: Arc<Mutex<Written>>,
     socket: Arc<UnixStream>,
     /// What the writer thread writes after everything queued, before it closes the connection
     /// ([`Outbox::end_with`]).
@@ -405,30 +403,6 @@ pub struct Outbox {
 
 /// Messages an outbox queues for its writer thread: a client further behind takes no more.
 const QUEUE: usize = 64;
-
-/// How far a client's messages are written to its socket, in order: their count, and when the
-/// one watched ([`Outbox::watch`]) was.
-#[derive(Default)]
-struct Written {
-    count: u64,
-    watched: u64,
-    at: Option<Instant>,
-}
-
-impl Written {
-    fn one(&mut self) {
-        self.count += 1;
-        if self.count == self.watched {
-            self.at = Some(Instant::now());
-        }
-    }
-}
-
-fn wrote(written: &Mutex<Written>) {
-    if let Ok(mut w) = written.lock() {
-        w.one();
-    }
-}
 
 impl Outbox {
     #[cfg(test)]
@@ -452,21 +426,15 @@ impl Outbox {
             captured_writer: None,
             queue: tx,
             queued: Arc::new(AtomicUsize::new(0)),
-            sent: AtomicU64::new(0),
-            written: Arc::default(),
             socket: Arc::new(stream),
             last: Arc::default(),
         };
-        let (queued, progress, socket, last) =
-            (out.queued.clone(), out.written.clone(), out.socket.clone(), out.last.clone());
+        let (queued, socket, last) = (out.queued.clone(), out.socket.clone(), out.last.clone());
         crate::threads::named(format!("client-{id}-write")).spawn(move || {
             let mut w = &*socket;
             let written = rx.iter().all(|data| {
                 let written = w.write_all(&data).and_then(|_| w.flush()).is_ok();
                 if written {
-                    // What the queue holds is one message each: whole, or what the server could
-                    // not write of it.
-                    wrote(&progress);
                     // Once nothing is left, the server writes again itself.
                     queued.fetch_sub(1, Ordering::AcqRel);
                 }
@@ -495,56 +463,19 @@ impl Outbox {
     }
 
     pub fn try_send(&self, data: Vec<u8>) -> Result<(), TrySendError<Vec<u8>>> {
-        let Some(rest) = self.write_now(data) else {
-            self.taken(true);
-            return Ok(());
-        };
+        let Some(rest) = self.write_now(data) else { return Ok(()) };
         self.queued.fetch_add(1, Ordering::AcqRel);
-        self.queue.try_send(rest).inspect(|_| self.taken(false)).inspect_err(|_| {
+        self.queue.try_send(rest).inspect_err(|_| {
             self.queued.fetch_sub(1, Ordering::AcqRel);
         })
     }
 
     pub fn send_timeout(&self, data: Vec<u8>, wait: Duration) -> Result<(), SendTimeoutError<Vec<u8>>> {
-        let Some(rest) = self.write_now(data) else {
-            self.taken(true);
-            return Ok(());
-        };
+        let Some(rest) = self.write_now(data) else { return Ok(()) };
         self.queued.fetch_add(1, Ordering::AcqRel);
-        self.queue.send_timeout(rest, wait).inspect(|_| self.taken(false)).inspect_err(|_| {
+        self.queue.send_timeout(rest, wait).inspect_err(|_| {
             self.queued.fetch_sub(1, Ordering::AcqRel);
         })
-    }
-
-    fn taken(&self, written: bool) {
-        self.sent.fetch_add(1, Ordering::AcqRel);
-        if written {
-            wrote(&self.written);
-        }
-    }
-
-    /// The number of the last message taken.
-    pub fn sent(&self) -> u64 {
-        self.sent.load(Ordering::Acquire)
-    }
-
-    /// Note when message `seq` is written to the socket (now if it already is).
-    pub fn watch(&self, seq: u64) {
-        if let Ok(mut w) = self.written.lock() {
-            w.watched = seq;
-            w.at = (w.count >= seq).then(Instant::now);
-        }
-    }
-
-    /// When the watched message `seq` was written to the socket, once it was.
-    pub fn written_at(&self, seq: u64) -> Option<Instant> {
-        self.written.lock().ok().filter(|w| w.watched == seq).and_then(|w| w.at)
-    }
-
-    /// The writer thread wrote one more message: for tests that hold what it would write.
-    #[cfg(test)]
-    pub(super) fn wrote_one(&self) {
-        wrote(&self.written);
     }
 
     /// Messages waiting for the writer thread.
@@ -649,8 +580,6 @@ mod tests {
             captured_writer: None,
             queue,
             queued: Arc::new(AtomicUsize::new(0)),
-            sent: AtomicU64::new(0),
-            written: Arc::default(),
             socket: Arc::new(socket),
             last: Arc::default(),
         };

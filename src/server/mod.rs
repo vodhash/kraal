@@ -2013,12 +2013,11 @@ impl Server {
                 wake = Some(wake.map_or(at, |w| w.min(at)));
             }
             let sent = match c.out.try_send(frame_bytes(&bytes)) {
-                Ok(()) => {
-                    if tell {
-                        c.told_shown = Some(shown);
-                    }
-                    Some(c.out.sent())
+                Ok(()) if tell => {
+                    c.told_shown = Some(shown);
+                    true
                 }
+                Ok(()) => true,
                 Err(TrySendError::Full(_)) => {
                     c.encoder.invalidate();
                     c.dirty = Dirty::Yes;
@@ -2026,12 +2025,12 @@ impl Server {
                     if let Some(ci) = self.images.get_mut(&id) {
                         ci.forget();
                     }
-                    None
+                    false
                 }
-                Err(TrySendError::Disconnected(_)) => None,
+                Err(TrySendError::Disconnected(_)) => false,
             };
-            if let Some(seq) = sent {
-                self.frame_sent(id, seq);
+            if sent {
+                self.frame_sent(id);
             }
             self.last_frame = Instant::now();
         }

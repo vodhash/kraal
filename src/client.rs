@@ -367,6 +367,7 @@ fn exchange(stream: &mut UnixStream, msg: &ClientMsg) -> Result<Result<Response,
                 | ServerMsg::Events { .. }
                 | ServerMsg::Attached { .. }
                 | ServerMsg::ClipboardFocus { .. }
+                | ServerMsg::DisplayMark { .. }
                 | ServerMsg::Clipboard { .. }
                 | ServerMsg::AttachmentPrepared { .. }
                 | ServerMsg::ClipboardImageOffer { .. }
@@ -1339,6 +1340,12 @@ pub fn attach(mut target: Target, mut workspace: Option<String>, mouse: bool, at
                             }
                             Ok(msg @ ServerMsg::ClipboardFocus { .. }) => {
                                 attachments.message(msg);
+                            }
+                            // The frames before it were written to the terminal above, in order.
+                            Ok(ServerMsg::DisplayMark { id }) => {
+                                if let Some(w) = writer.lock().unwrap().as_mut() {
+                                    let _ = protocol::write_json(w, &ClientMsg::Displayed { id });
+                                }
                             }
                             Ok(msg @ ServerMsg::ClipboardImageOffer { .. }) => {
                                 attachments.message(msg);

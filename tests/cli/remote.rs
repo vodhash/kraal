@@ -2207,3 +2207,36 @@ fn production_commands_from_a_pane_whose_session_cannot_be_asked_do_nothing() {
     assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("gone"));
     assert!(!reached.exists(), "the command reached the server");
 }
+
+/// An agent's production command waits in a real attached client until the person allows it:
+/// that client says when it displayed the question, and only a key after that answers it.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_agents_production_command_runs_once_allowed_in_the_attached_client() {
+    let env = Env::new("prod-allow");
+    let (bin, reached) = (env.root.join("bin"), env.root.join("reached"));
+    std::fs::create_dir_all(&bin).unwrap();
+    write_script(&bin.join("ssh"), &format!("#!/bin/sh\ntouch '{}'\n", reached.display()));
+    std::fs::write(
+        env.root.join("config/kraal/servers.toml"),
+        "[[server]]\nname = \"web-prod-1\"\nhost = \"web-prod-1\"\n",
+    )
+    .unwrap();
+    // The agent: a program named claude that deploys through kraal, then waits.
+    let claude = bin.join("claude");
+    let kraal = env!("CARGO_BIN_EXE_kraal");
+    write_script(
+        &claude,
+        &format!("#!/bin/sh\nPATH='{}':$PATH '{kraal}' exec web-prod-1 -- deploy\nsleep 30\n", bin.display()),
+    );
+    env.workspace("w", "layout {\n    pane name=\"main\"\n}\n");
+    env.run(&["open", "w"]);
+    let mut client = TerminalClient::attach(&env);
+    env.run(&["run", "-n", "agent", "--", &claude.display().to_string()]);
+    client.wait_for("to act on production?");
+    assert!(!reached.exists(), "nothing runs before the answer");
+    // Read, then allowed: the move to Allow and the confirmation come after it was displayed.
+    std::thread::sleep(Duration::from_millis(600));
+    client.type_keys(b"y");
+    wait_until(PATIENCE, "the allowed command to run", || reached.exists());
+}
