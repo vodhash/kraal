@@ -247,6 +247,16 @@ impl Server {
             }
             Action::NextTab => self.switch_tab(wi, 1),
             Action::PrevTab => self.switch_tab(wi, -1),
+            Action::MoveTabLeft | Action::MoveTabRight => {
+                let ws = &mut self.workspaces[wi];
+                let to = if action == Action::MoveTabLeft { ws.active.checked_sub(1) } else { Some(ws.active + 1) };
+                if let Some(to) = to.filter(|to| *to < ws.tabs.len()) {
+                    ws.tabs.swap(ws.active, to);
+                    ws.active = to;
+                    self.mark_persist();
+                    self.mark_dirty();
+                }
+            }
             Action::Tab(n) => {
                 let ws = &mut self.workspaces[wi];
                 if (n as usize) <= ws.tabs.len() {
@@ -607,6 +617,26 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_moves_left_and_right_and_stays_shown() {
+        let (tx, _rx) = crate::server::event_channel(4096);
+        let mut server = crate::server::tests::server(tx);
+        let (client, _peer) = crate::server::tests::client(&mut server);
+        let ws = &mut server.workspaces[0];
+        ws.tabs = (1..=3).map(|id| crate::server::Tab::new(id, String::new())).collect();
+        ws.active = 2;
+        let order = |server: &Server| server.workspaces[0].tabs.iter().map(|t| t.id).collect::<Vec<_>>();
+        for (action, tabs, active) in [
+            (Action::MoveTabLeft, [1, 3, 2], 1),
+            (Action::MoveTabLeft, [3, 1, 2], 0),
+            (Action::MoveTabLeft, [3, 1, 2], 0),
+            (Action::MoveTabRight, [1, 3, 2], 1),
+        ] {
+            server.action(client, action);
+            assert_eq!((order(&server), server.workspaces[0].active), (tabs.to_vec(), active));
+        }
+    }
+
+    #[test]
     fn screen_empty_workspaces_render_and_add_a_pane_with_enter_or_a_click() {
         for (cols, rows, mouse) in [(80, 24, false), (124, 36, true)] {
             let (tx, _rx) = crate::server::event_channel(4096);
@@ -628,8 +658,15 @@ mod tests {
                 .filter(|row| !row.is_empty())
                 .collect();
             assert_eq!(content, ["No panes.", "+ Add pane"]);
-            for action in [Action::CloseTab, Action::RenameTab, Action::NextLayout, Action::ToggleZoom, Action::Unstack]
-            {
+            for action in [
+                Action::CloseTab,
+                Action::RenameTab,
+                Action::MoveTabLeft,
+                Action::MoveTabRight,
+                Action::NextLayout,
+                Action::ToggleZoom,
+                Action::Unstack,
+            ] {
                 server.action(client, action);
                 assert!(server.workspaces[0].tabs.is_empty());
             }

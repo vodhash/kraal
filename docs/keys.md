@@ -20,7 +20,7 @@ any keyboard layout.
 | broadcast | `b` typing goes to the whole tab, `b` again stops | `B`: `b` this tab, `w` the whole workspace, `m` mark this pane, `s` the marked panes, `o` stop |
 | workspaces | `w` choose one | `W`: `w` choose, `n` add, `←`/`→` previous/next, `e` rename, `s` export the layout, `r` restart the session (on the kraal installed now), `q` quit, `x` close |
 | agents | `a` start one on an account | `A`: `a` start, `l` accounts, `n` add account, `g` go to the agent needing you, `c` change account |
-| tabs | `t` new tab | `T`: `t` new, `←`/`→` previous/next, `e` rename, `x` close |
+| tabs | `t` new tab | `T`: `t` new, `←`/`→` previous/next, `shift+←`/`shift+→` move the tab, `e` rename, `x` close |
 | panes | `p` find a pane | `P`: `p` find, `n` new, `→`/`↓` split, `e` edit name, folder and command, `r` resize with the arrows, `f` floating, `l` next layout, `s` then an arrow stack with the pane on that side, `u` unstack, `x` close |
 | view | `v` copy mode: scroll and select | `V`: `v` copy mode, `g` search the output, `o` links and paths, `c` copy the last command's output, `p` paste buffers, `f` floating panes, `l` sidebar, `k` bottom bar, `j` message log |
 | files | `f` file manager | `F`: `f` file manager, `p` preview a file, `u`/`d` upload/download |
